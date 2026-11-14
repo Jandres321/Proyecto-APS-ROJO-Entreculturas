@@ -24,6 +24,9 @@ class Settings(BaseSettings):
     llm_provider: str = "fake"
     llm_model: str = ""
     llm_api_key: str = ""
+    # Standard variable of the Anthropic SDK; used when LLM_PROVIDER=anthropic and LLM_API_KEY is
+    # empty, so a .env written for the command-line conciliador works here too.
+    anthropic_api_key: str = ""
     llm_max_concurrency: int = 4
 
     # Sending documents to an external LLM is OFF unless the team explicitly allows it

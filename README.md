@@ -420,8 +420,9 @@ python -m app.lectura "$DATA_DIR/DocJustificativa/24-UG-226 Adjumani - Xunta 202
   página (`pagina_inicio`/`pagina_fin`). Todo con reglas en código; el LLM, si se activa, solo
   completa y sus valores pisan a las reglas.
 - **Backend LLM con visión:** desactivado por defecto porque envía páginas a un servicio externo.
-  Con proveedor distinto de `fake` exige `ALLOW_EXTERNAL_LLM=true`; los proveedores reales aún no
-  están implementados en `app/llm/`.
+  Con proveedor distinto de `fake` exige `ALLOW_EXTERNAL_LLM=true`. Proveedor implementado: `anthropic`
+  (`app/llm/anthropic_client.py`, salida estructurada; modelo en `LLM_MODEL`, por defecto `claude-haiku-5-5`;
+  clave en `LLM_API_KEY` o, si está vacía, `ANTHROPIC_API_KEY`). `openai` y `gemini` siguen sin implementar.
 
 Requisitos: Tesseract con `spa`, `eng`, `fra` y `osd` (la imagen Docker ya los instala; en Windows
 `winget install UB-Mannheim.TesseractOCR` y define `TESSDATA_DIR` si falta algún idioma).
@@ -484,3 +485,49 @@ frontend/          Vite + React + TS (TanStack Query/Table, react-pdf, react-rou
 ## `AMOUNT_MISMATCH` suavizado
 
 Si el documento está asignado con confianza alta/media, o la lectura OCR tiene confianza < 70 %, la diferencia de importe sale como severidad **baja** con el texto «Revisar la lectura del importe…» (casi siempre es un error de OCR). Parámetros en `rules/<donante>.yaml`: `soft_below_ocr_confidence`, `soft_link_confidences`.
+
+## Integración con el conciliador
+
+La rama `integracion-revisor` junta este repositorio con el conciliador por línea de comandos
+(`src/conciliador/`, documentado en [docs/conciliador.md](docs/conciliador.md)). Las dos ramas no tenían
+historia común: se han fusionado tal cual y las dos piezas **conviven sin tocarse**. Esta aplicación es la
+interfaz que se mantiene; lo que el conciliador tiene de más se va portando aquí.
+
+| Función del conciliador | Estado en el backend (14/11/2026) |
+|---|---|
+| Cruce por nombre de archivo | **Portado** desde antes (`pipeline/conciliador.py`): reproduce el 161/181 de Uganda |
+| Documentos sin información en el nombre no se toman por copias (`AC-07.pdf`) | **Portado**: sin esto un empate exacto entre dos documentos no salía como ambiguo |
+| Lectura del documento con Claude (visión) | El backend ya la tenía por página (`lectura/vision.py`). **Arreglado el cliente**: usaba una tool forzada (`tool_choice`), que los modelos actuales (`claude-sonnet-5-5`, `claude-opus-5-5`) rechazan con un error 400; ahora usa salida estructurada. La imagen Docker instala ya el extra `llm`. **Sin probar contra la API real desde el backend** |
+| Clave de la API | `LLM_API_KEY` o, si está vacía, `ANTHROPIC_API_KEY`: sirve el mismo `.env` del conciliador |
+| Fecha de pago como segunda fecha del cruce por contenido | **Pendiente.** En La Rioja la fecha del documento era la de pago en 8 de 15 casos. Aquí cambia los resultados de `match_content.py` y hay que medirlo antes con `make evaluar-hibrido` (hoy la fecha de pago solo se usa en `DATE_MISMATCH`) |
+| Tope de llamadas por ejecución, exclusión de archivos (nóminas) y leer solo los documentos dudosos | **Pendiente.** El backend lee todas las páginas de todos los PDF; con el LLM activado eso es coste y datos personales enviados fuera |
+| Proyectos ECHO (Colombia) y La Rioja (Colombia) | Solo en el conciliador (`config/*.yaml`). Aquí hace falta un adaptador de donante por cada uno (`app/adapters/`) |
+| Google Drive y un YAML por proyecto | Solo en el conciliador |
+
+**Lo que enseñaron las pruebas reales del conciliador con Claude** (detalle en `docs/conciliador.md`, sección 9), útil para este backend:
+
+- En **La Rioja** (archivos nombrados solo por su nº de orden) el importe leído coincidió con el del listado en
+  los 15 documentos: se asignaron 12 gastos, 11 correctos, sin falsos positivos. Es el caso que aquí queda
+  «solo por contenido», donde el OCR no llega.
+- En **Uganda** el importe leído **no** coincide con el del listado aunque la lectura sea correcta (se comprobó
+  a mano un documento): no es la moneda ni la imputación parcial. Es coherente con los 37 `contradicho`
+  de la tabla de arriba, que por tanto pueden no ser errores de OCR sino del dato.
+
+**Cómo se ejecuta cada pieza:**
+
+```bash
+# Aplicación (esta): Docker
+docker compose up --build            # o make up / make ui
+
+# Conciliador (línea de comandos), desde la raíz, con su propio entorno
+pip install -e ".[dev]"
+python -m conciliador config/uganda_adjumani.yaml --validar
+python -m pytest                     # tests del conciliador (los del backend: make test)
+```
+
+`DATA_DIR` de esta aplicación puede apuntar a la carpeta `TUM_SociAI/` que usa el conciliador: es el mismo
+conjunto de datos.
+
+**Verificación de la integración (14/11/2026):** tests del conciliador, 57 de 57. Tests del backend fuera de
+Docker con Python 3.12: 265 pasan con los datos reales y 59 se saltan (58 necesitan PostgreSQL y 1 Tesseract);
+**esos 59 no se han ejecutado** tras la fusión.

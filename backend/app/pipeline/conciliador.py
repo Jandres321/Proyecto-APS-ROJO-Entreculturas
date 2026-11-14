@@ -185,7 +185,13 @@ class NameDoc:
 
     @property
     def signature(self) -> tuple:
-        """Copies / other versions of the same document share it (e.g. the .pdf and the .xlsx)."""
+        """Copies / other versions of the same document share it (e.g. the .pdf and the .xlsx).
+
+        A name that says nothing once the order number is hidden ("AC-07.pdf") cannot prove
+        two files are copies: each such document is its own (otherwise ties go undetected).
+        """
+        if not (self.text or self.months or self.refs):
+            return ("name without information", self.doc_key)
         return (self.text, frozenset(self.months), frozenset(self.refs))
 
 

@@ -160,3 +160,13 @@ def test_params_can_be_overridden_per_project():
     strict = c.NameReconciler({**CONFIG, "params": {"threshold": 0.95}})
     out = strict.propose([exp(1, "Material de oficina varia")], {"d": ["Material oficina.pdf"]})
     assert not out[1].assigned
+
+
+def test_names_without_information_are_not_copies_of_each_other(rec):
+    """Bare order numbers ("7.pdf") leave no text: such files are distinct documents, while a
+    .pdf and a .xlsx with the same descriptive name are still the same one."""
+    a, b = rec.prepare_doc("sha-a", "7.pdf"), rec.prepare_doc("sha-b", "8.pdf")
+    assert a.text == b.text == "" and a.signature != b.signature
+    pdf = rec.prepare_doc("sha-c", "12. Fondo pensiones.pdf")
+    xlsx = rec.prepare_doc("sha-d", "12. Fondo pensiones.xlsx")
+    assert pdf.signature == xlsx.signature

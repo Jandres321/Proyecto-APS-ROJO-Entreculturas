@@ -22,6 +22,7 @@ def get_llm_client(settings: Settings | None = None) -> LLMClient:
     if provider == "anthropic":
         from app.llm.anthropic_client import AnthropicClient
 
+        common["api_key"] = settings.llm_api_key or settings.anthropic_api_key
         return AnthropicClient(**common)
     if provider in PLANNED_PROVIDERS:
         raise NotImplementedError(f"LLM provider '{provider}' is not implemented yet")
