@@ -19,6 +19,26 @@ COLORES = {
 }
 
 
+def _explicacion(r: Resultado) -> str:
+    """Texto para el revisor: conclusión primero y luego los motivos."""
+    m, s = r.mejor, r.segundo
+    if m is None:
+        return "No hay documentos en la carpeta."
+    motivos = " ".join(m.motivos)
+    if r.estado != "asignado":
+        return (f"No se ha encontrado un documento que encaje. El más parecido es «{m.documento.nombre}», "
+                f"pero no basta. {motivos}")
+    inicio = {
+        "alta": "Asignación segura.",
+        "media": "Asignación probable.",
+        "baja": "Asignación dudosa: revisar.",
+    }.get(r.confianza, "")
+    texto = f"{inicio} {motivos}"
+    if r.ambiguo and s:
+        texto += f" Ojo: «{s.documento.nombre}» encaja casi igual de bien."
+    return texto
+
+
 def _tablas(resultados: list[Resultado], documentos: list[Documento]):
     filas = []
     for r in resultados:
@@ -37,7 +57,7 @@ def _tablas(resultados: list[Resultado], documentos: list[Documento]):
             "Ambiguo": "sí" if r.ambiguo else "",
             "Documento": m.documento.nombre if asignado else "",
             "Puntuación": m.puntuacion if m else None,
-            "Motivo": "; ".join(m.motivos) if m else "",
+            "Motivo": _explicacion(r),
             "Mejor candidato (si no asignado)": m.documento.nombre if (m and not asignado) else "",
             "2º candidato": s.documento.nombre if s else "",
             "Puntuación 2º": s.puntuacion if s else None,

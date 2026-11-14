@@ -59,6 +59,30 @@ def similitud(texto_gasto: str, texto_doc: str, texto_descripcion: str = "") -> 
     return 0.35 * cont_doc + 0.50 * cont_desc + 0.15 * conj
 
 
+_NOMBRE_MES = ["", "enero", "febrero", "marzo", "abril", "mayo", "junio", "julio", "agosto",
+               "septiembre", "octubre", "noviembre", "diciembre"]
+
+
+def _meses_legibles(meses: set[int]) -> str:
+    return " y ".join(_NOMBRE_MES[m] for m in sorted(meses))
+
+
+def _ref_legible(ref: str) -> str:
+    """'EB#602' -> 'EB-602'; '#46681' -> '46681'"""
+    prefijo, numero = ref.split("#", 1)
+    return f"{prefijo}-{numero}" if prefijo else numero
+
+
+def _frase_concepto(sim: float) -> str:
+    if sim >= 0.8:
+        return f"El concepto del archivo coincide con el del gasto ({sim:.0%})."
+    if sim >= 0.5:
+        return f"El concepto del archivo se parece al del gasto ({sim:.0%})."
+    if sim >= 0.2:
+        return f"El concepto del archivo se parece poco al del gasto ({sim:.0%})."
+    return f"El concepto del archivo no se parece al del gasto ({sim:.0%})."
+
+
 class Conciliador:
     def __init__(self, cfg_cruce: dict | None, cfg_referencias: dict, patron_prefijo: str | None,
                  sinonimos: dict | None = None):
@@ -106,6 +130,7 @@ class Conciliador:
 
     # ---------- puntuación ----------
     def puntuar(self, g: Gasto, d: Documento) -> Candidato:
+        """Puntúa el documento para el gasto. Los motivos son frases para el revisor."""
         p, motivos = self.p, []
         sim = similitud(g.texto, d.texto, g.texto_descripcion)
 
@@ -114,30 +139,38 @@ class Conciliador:
         numeros = numeros_de(g.refs) & numeros_de(d.refs)
         if comunes:
             puntos += p["bonus_referencia"]
+            refs_txt = ", ".join(_ref_legible(r) for r in sorted(comunes))
             # La referencia basta por sí sola solo si identifica un único documento; si la
             # comparten varios (p. ej. un comprobante de egreso con varias nóminas), decide el concepto.
             if any(self._docs_por_ref.get(r, 0) == 1 for r in comunes):
                 puntos = max(puntos, p["minimo_referencia"])
-            motivos.append(f"referencia {', '.join(sorted(comunes))}")
+                motivos.append(f"El nº de factura/comprobante {refs_txt} aparece en el nombre del archivo.")
+            else:
+                motivos.append(f"El nº {refs_txt} aparece en el nombre del archivo, pero también en otros "
+                               f"documentos, así que se ha decidido por el concepto.")
         elif numeros:
             puntos += p["bonus_numero"]
-            motivos.append(f"mismo nº con otro prefijo ({', '.join(sorted(numeros))})")
+            motivos.append(f"El número {', '.join(sorted(numeros))} aparece en el archivo, aunque con otro "
+                           f"prefijo (posible errata o distinto tipo de comprobante).")
         elif g.refs and d.refs:
             puntos -= p["penalizacion_referencia"]
-            motivos.append("referencias distintas")
-        motivos.append(f"concepto {sim:.0%}")
+            motivos.append("El archivo lleva un nº de factura distinto al del gasto.")
+        motivos.append(_frase_concepto(sim))
 
         if d.meses:
             exactos, anteriores = self.meses_gasto(g)
+            mes_doc = _meses_legibles(d.meses)
             if d.meses & exactos:
                 puntos += p["bonus_mes"]
-                motivos.append("mes coincide")
+                motivos.append(f"El mes del archivo ({mes_doc}) coincide con el del gasto.")
             elif d.meses & anteriores:
                 puntos += p["bonus_mes_anterior"]
-                motivos.append("mes contiguo")
+                motivos.append(f"El archivo es de {mes_doc}, un mes contiguo al del gasto (habitual en "
+                               f"cotizaciones que se pagan al mes siguiente).")
             else:
                 puntos -= p["penalizacion_mes"]
-                motivos.append("mes no coincide")
+                motivos.append(f"El mes del archivo ({mes_doc}) no coincide con el del gasto "
+                               f"({_meses_legibles(exactos) or 'sin fecha'}).")
 
         return Candidato(documento=d, puntuacion=round(puntos, 4), motivos=motivos)
 

@@ -32,7 +32,14 @@ def main(argv: list[str] | None = None) -> int:
 
     val = validar(resultados, documentos, cfg["prefijo_orden"]) if a.validar else None
     salida = a.salida or raiz / "output" / f"{a.config.stem}.xlsx"
-    escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val)
+    try:
+        escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val)
+    except PermissionError:
+        # El Excel anterior está abierto (Windows lo bloquea): se guarda con otro nombre
+        from datetime import datetime
+        salida = salida.with_name(f"{salida.stem}_{datetime.now():%Y%m%d_%H%M%S}{salida.suffix}")
+        print("Aviso: el Excel de salida estaba abierto; se guarda con otro nombre.")
+        escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val)
 
     asignados = sum(r.estado == "asignado" for r in resultados)
     print(f"Gastos: {len(gastos)} | con justificante: {asignados} | sin justificante: {len(gastos) - asignados}")
