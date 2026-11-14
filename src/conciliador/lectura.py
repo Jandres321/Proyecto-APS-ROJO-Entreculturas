@@ -238,7 +238,9 @@ def leer_documentos(documentos: list[Documento], lector: Lector, max_llamadas: i
             raise ErrorLectura("La API ha rechazado la clave. Revisa ANTHROPIC_API_KEY en .env.") from e
         except (*de_documento, ValueError, OSError) as e:
             # Fallo de un documento: se anota y se sigue con el resto
-            d.lectura = f"no leído: {e if isinstance(e, ValueError) else type(e).__name__}"
+            # Los errores de la API traen su propio mensaje (sin datos del documento ni la clave)
+            motivo = e if isinstance(e, ValueError) else (getattr(e, "message", "") or type(e).__name__)
+            d.lectura = f"no leído: {motivo}"
             r["errores"] += 1
             r["llamadas"] += not cacheado      # el intento también cuenta para el tope
             seguidos += 1

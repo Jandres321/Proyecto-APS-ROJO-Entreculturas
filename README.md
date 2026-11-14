@@ -104,7 +104,8 @@ Nosotros no partimos de su código. Sus reglas (`Rules.xlsx`) servirán para la 
 ├── config/                    # Un YAML por proyecto: describe sus datos
 │   ├── uganda_adjumani.yaml   #   piloto (Xunta, Uganda)
 │   ├── echo_colombia.yaml     #   segundo caso (ECHO, Colombia)
-│   └── ejemplo_drive.yaml     #   plantilla para un proyecto con documentos en Google Drive
+│   ├── ejemplo_drive.yaml     #   plantilla para un proyecto con documentos en Google Drive
+│   └── prueba_contenido.yaml  #   prueba de la lectura del contenido con pocas facturas (Uganda)
 ├── src/conciliador/           # Código del conciliador
 │   ├── __main__.py            #   CLI: lee config → cruza → valida → escribe Excel
 │   ├── modelos.py             #   Estructuras: Documento, Gasto, Candidato, Resultado
@@ -292,6 +293,29 @@ python -m pytest
 
 De momento solo funciona con documentos en una **carpeta local**. Con Drive se avisa y se cruza solo por nombre.
 
+#### Primera prueba con pocas facturas
+
+`config/prueba_contenido.yaml` es el YAML de Uganda apuntando a una carpeta pequeña, `TUM_SociAI/prueba_contenido/` (no se versiona), con la lectura activada y un tope de **5 llamadas**. **Solo los archivos que copies ahí se envían a la API**, así que eliges tú qué sale del equipo.
+
+1. Crea el `.env` (si no existe, copia `.env.example`) y pega tu clave después de `ANTHROPIC_API_KEY=`, sin comillas ni espacios.
+2. Copia en `TUM_SociAI/prueba_contenido/` entre 3 y 5 facturas de `DocJustificativa/24-UG-226 Adjumani - Xunta 2024/`, **con su nombre original** (la validación usa el nº de orden del nombre). Evita nóminas, contratos y cualquier documento con datos personales.
+3. Comprueba qué se va a enviar, sin gastar nada:
+   ```cmd
+   python -m conciliador config/prueba_contenido.yaml --listar-documentos
+   ```
+4. Ejecuta la prueba:
+   ```cmd
+   python -m conciliador config/prueba_contenido.yaml --validar
+   ```
+   Imprime cuántos documentos envía y, al final, cuántos ha leído, cuántos han fallado y en cuántos gastos cambia el resultado.
+5. Abre el Excel nuevo de `output/` y mira:
+   - **Documentos**: las columnas *Leído por contenido* (`sí`, `ilegible` o `no leído: motivo`) y *Datos del contenido*. Compara lo leído con el PDF: ¿importe, fecha, proveedor y nº de factura son correctos?
+   - **Gastos**: el *Motivo* de los gastos que se han cruzado con esos documentos; explica lo que se ha leído dentro.
+   - **Resumen**: el bloque *Lectura del contenido*.
+6. Repite la ejecución: no debe volver a llamar a la API (los documentos ya leídos están en `output/cache_lectura/`). Para empezar de cero, borra esa carpeta.
+
+Como el listado es el de todo el proyecto (203 gastos) y la carpeta solo tiene unas pocas facturas, casi todos los gastos saldrán sin justificante: es lo esperado, lo que importa es la lectura de esos documentos.
+
 ### Google Drive
 
 El conciliador puede leer los documentos **directamente de una carpeta de Google Drive**, subcarpetas y unidades compartidas incluidas.
@@ -468,3 +492,4 @@ Este archivo es el **contexto compartido** del equipo y de las IAs que usemos. R
 | 14/11/2026 | **Lectura del contenido** (opcional, desactivada por defecto): `lectura.py` (API de Claude con salida estructurada y caché por hash), señales de importe, fecha, proveedor y nº de factura en el cruce, aviso de conflicto nombre/contenido, sección `contenido:` del YAML, `--contenido`, columnas nuevas en el Excel, `importe_local` en el listado, extra `.[contenido]`, tests con API simulada. Sin ejecutar con documentos reales |
 | 14/11/2026 | Limpieza: un único formato de importes (`texto.formato_importe`) y una única firma de documento (`Documento.firma`); `lectura.py` queda solo con la API y el resumen para el Excel pasa a `salida.py`; `requirements.txt` remite a `pyproject.toml`; `AGENTS.md` recoge las reglas de la clave y de la lectura del contenido. Sin cambios en el cruce ni en las métricas |
 | 14/11/2026 | El Excel de salida lleva siempre la fecha y la hora en el nombre (`output/<yaml>_<AAAAMMDD>_<HHMMSS>.xlsx`): cada ejecución genera un archivo distinto. `--salida` sigue usando la ruta exacta |
+| 14/11/2026 | Preparada la primera prueba real de la lectura del contenido: `config/prueba_contenido.yaml` (carpeta pequeña `TUM_SociAI/prueba_contenido/`, tope de 5 llamadas) y guía en la sección 7. Los errores de la API ahora muestran su mensaje en «Leído por contenido» |
