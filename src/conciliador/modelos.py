@@ -29,6 +29,8 @@ class Gasto:
     importe_eur: float | None
     pago: str = ""
     referencia_extra: str = ""   # otras columnas con referencias (p. ej. código contable)
+    imputado_donante: float | None = None   # importe imputado al donante (None = no informado)
+    imputado_otros: float | None = None     # importe imputado a otros financiadores
     orden: str | None = None     # nº de orden manual: solo para validar
     texto: str = ""
     texto_descripcion: str = ""
@@ -50,3 +52,5 @@ class Resultado:
     estado: str                  # "asignado" | "sin_justificante"
     confianza: str               # "alta" | "media" | "baja" | ""
     ambiguo: bool = False
+    # Para gastos sin justificante: "revisar" | "cofinanciacion" | "indirecto"
+    clasificacion: str = ""

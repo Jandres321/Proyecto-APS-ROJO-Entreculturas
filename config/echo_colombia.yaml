@@ -23,6 +23,9 @@ listado:
     importe_eur: 11   # Total euros equivalentes
     partida: 17       # línea presupuestaria ECHO (II.3.2.3...)
   columnas_referencia: [2]   # Código contable del comprobante de egreso (206-15000, 800-00337...)
+  imputacion:
+    donante: [13]     # Imputado a ECHO
+    otros: [14]       # Imputado a PRM
   obligatorias: [fecha, factura]
 
 referencias:

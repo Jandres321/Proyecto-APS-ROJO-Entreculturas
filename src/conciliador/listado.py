@@ -40,6 +40,27 @@ def _a_numero(v) -> float | None:
         return None
 
 
+def _a_importe(v) -> float | None:
+    """Importe que puede venir como número, '€ -', '1.234,5 €' o vacío."""
+    if v is None or (isinstance(v, float) and pd.isna(v)):
+        return None
+    if isinstance(v, (int, float)):
+        return float(v)
+    t = str(v).replace("€", "").replace("\xa0", "").strip()
+    if t in ("", "-"):
+        return 0.0 if t == "-" else None
+    t = t.replace(".", "").replace(",", ".") if "," in t else t
+    try:
+        return float(t)
+    except ValueError:
+        return None
+
+
+def _suma(valores) -> float | None:
+    nums = [v for v in valores if v is not None]
+    return sum(nums) if nums else None
+
+
 def leer_listado(cfg: dict, raiz: Path) -> list[Gasto]:
     ruta = raiz / cfg["archivo"]
     df = pd.read_excel(ruta, sheet_name=cfg["hoja"], header=None, dtype=object)
@@ -59,6 +80,9 @@ def leer_listado(cfg: dict, raiz: Path) -> list[Gasto]:
             continue
         orden = _a_texto(celda(fila, "orden")) or None
         extra = " ".join(_a_texto(celda(fila, c)) for c in cfg.get("columnas_referencia", []))
+        imputacion = cfg.get("imputacion", {})
+        imp_donante = _suma(_a_importe(celda(fila, c)) for c in imputacion.get("donante", []))
+        imp_otros = _suma(_a_importe(celda(fila, c)) for c in imputacion.get("otros", []))
         gastos.append(Gasto(
             fila=idx + 1,
             partida=_a_texto(celda(fila, "partida")),
@@ -69,6 +93,8 @@ def leer_listado(cfg: dict, raiz: Path) -> list[Gasto]:
             importe_eur=_a_numero(celda(fila, "importe_eur")),
             pago=_a_texto(celda(fila, "pago")),
             referencia_extra=extra,
+            imputado_donante=imp_donante,
+            imputado_otros=imp_otros,
             orden=orden,
         ))
     return gastos

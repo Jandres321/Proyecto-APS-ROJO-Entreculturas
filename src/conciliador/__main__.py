@@ -27,7 +27,8 @@ def main(argv: list[str] | None = None) -> int:
 
     gastos = leer_listado(cfg["listado"], raiz)
     documentos = crear_fuente(cfg["documentos"], raiz).listar()
-    conc = Conciliador(cfg.get("cruce", {}), cfg["referencias"], cfg.get("prefijo_orden"), cfg.get("sinonimos"))
+    conc = Conciliador(cfg.get("cruce", {}), cfg["referencias"], cfg.get("prefijo_orden"), cfg.get("sinonimos"),
+                       cfg["listado"].get("partidas_indirectos"))
     resultados = conc.conciliar(gastos, documentos)
 
     val = validar(resultados, documentos, cfg["prefijo_orden"]) if a.validar else None
@@ -42,7 +43,10 @@ def main(argv: list[str] | None = None) -> int:
         escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val)
 
     asignados = sum(r.estado == "asignado" for r in resultados)
-    print(f"Gastos: {len(gastos)} | con justificante: {asignados} | sin justificante: {len(gastos) - asignados}")
+    from collections import Counter
+    clas = Counter(r.clasificacion for r in resultados if r.estado != "asignado")
+    print(f"Gastos: {len(gastos)} | con justificante: {asignados} | sin justificante: {len(gastos) - asignados} "
+          f"(revisar: {clas['revisar']}, cofinanciación: {clas['cofinanciacion']}, indirectos: {clas['indirecto']})")
     print(f"Documentos: {len(documentos)}")
     if val:
         m = val.metricas

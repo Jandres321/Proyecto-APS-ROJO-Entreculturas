@@ -12,8 +12,16 @@ from openpyxl.utils import get_column_letter
 from .modelos import Documento, Resultado
 from .validacion import Validacion
 
+ESTADOS = {
+    "revisar": "Sin justificante: revisar",
+    "cofinanciacion": "Sin documento: cofinanciación (no imputado al donante)",
+    "indirecto": "Sin documento: coste indirecto (se justifica con certificado)",
+}
+
 COLORES = {
     "alta": "C6EFCE", "media": "FFEB9C", "baja": "F8CBAD", "sin_justificante": "FFC7CE",
+    ESTADOS["revisar"]: "FFC7CE", ESTADOS["cofinanciacion"]: "DDEBF7", ESTADOS["indirecto"]: "DDEBF7",
+    "Con justificante": "C6EFCE",
     "correcto": "C6EFCE", "correcto_sin_documento": "C6EFCE", "incorrecto": "FFC7CE",
     "no_encontrado": "F8CBAD", "falso_positivo": "FFC7CE",
 }
@@ -26,6 +34,13 @@ def _explicacion(r: Resultado) -> str:
         return "No hay documentos en la carpeta."
     motivos = " ".join(m.motivos)
     if r.estado != "asignado":
+        g = r.gasto
+        if r.clasificacion == "cofinanciacion":
+            return (f"Gasto imputado a otros financiadores ({g.imputado_otros:,.2f} €) y no al donante: "
+                    f"es cofinanciación y normalmente no se incluye en la carpeta del donante.")
+        if r.clasificacion == "indirecto":
+            return ("Coste indirecto: normalmente se justifica con un certificado de la entidad, no con "
+                    "facturas. Comprobar que el certificado está en la documentación.")
         return (f"No se ha encontrado un documento que encaje. El más parecido es «{m.documento.nombre}», "
                 f"pero no basta. {motivos}")
     inicio = {
@@ -52,7 +67,8 @@ def _tablas(resultados: list[Resultado], documentos: list[Documento]):
             "Proveedor": g.proveedor,
             "Descripción": g.descripcion,
             "Importe €": g.importe_eur,
-            "Estado": "Con justificante" if asignado else "Sin justificante",
+            "Imputado al donante €": g.imputado_donante,
+            "Estado": "Con justificante" if asignado else ESTADOS.get(r.clasificacion, ESTADOS["revisar"]),
             "Confianza": r.confianza if asignado else "",
             "Ambiguo": "sí" if r.ambiguo else "",
             "Documento": m.documento.nombre if asignado else "",
@@ -102,13 +118,14 @@ def _formatear(ws, df: pd.DataFrame, col_color: str | None = None, col_link: str
     for i, nombre in enumerate(df.columns, start=1):
         largo = max([len(str(nombre))] + [len(str(v)) for v in df[nombre].head(300).tolist()])
         ws.column_dimensions[get_column_letter(i)].width = min(max(10, largo + 2), 60)
-    if col_color and col_color in df.columns:
-        j = list(df.columns).index(col_color) + 1
+    for col in ([col_color] if isinstance(col_color, str) else (col_color or [])):
+        if col not in df.columns:
+            continue
+        j = list(df.columns).index(col) + 1
         for fila in range(2, ws.max_row + 1):
             v = ws.cell(fila, j).value
-            clave = "sin_justificante" if v in ("Sin justificante",) else v
-            if clave in COLORES:
-                ws.cell(fila, j).fill = PatternFill("solid", fgColor=COLORES[clave])
+            if v in COLORES:
+                ws.cell(fila, j).fill = PatternFill("solid", fgColor=COLORES[v])
     if col_link and link_src is not None and col_link in df.columns:
         j = list(df.columns).index(col_link) + 1
         for fila, ubic in enumerate(link_src.tolist(), start=2):
@@ -123,6 +140,9 @@ def escribir_excel(ruta: Path, proyecto: str, resultados: list[Resultado], docum
                    validacion: Validacion | None = None) -> Path:
     gastos, docs = _tablas(resultados, documentos)
     con = gastos["Estado"] == "Con justificante"
+    revisar = gastos["Estado"] == ESTADOS["revisar"]
+    cofin = gastos["Estado"] == ESTADOS["cofinanciacion"]
+    indir = gastos["Estado"] == ESTADOS["indirecto"]
     sin_doc = (docs["Gastos asignados"] == 0) & (docs["Observación"] == "")
     copias = (docs["Gastos asignados"] == 0) & (docs["Observación"] != "")
     resumen = pd.DataFrame([
@@ -133,9 +153,11 @@ def escribir_excel(ruta: Path, proyecto: str, resultados: list[Resultado], docum
         ("   · confianza alta", int((gastos["Confianza"] == "alta").sum())),
         ("   · confianza media", int((gastos["Confianza"] == "media").sum())),
         ("   · confianza baja / ambiguos", int((gastos["Confianza"] == "baja").sum())),
-        ("Gastos sin justificante", int((~con).sum())),
+        ("Gastos sin justificante: revisar", int(revisar.sum())),
+        ("Gastos sin documento por cofinanciación (no imputados al donante)", int(cofin.sum())),
+        ("Gastos sin documento por ser costes indirectos (certificado)", int(indir.sum())),
         ("Importe con justificante €", round(float(gastos.loc[con, "Importe €"].sum()), 2)),
-        ("Importe sin justificante €", round(float(gastos.loc[~con, "Importe €"].sum()), 2)),
+        ("Importe sin justificante a revisar €", round(float(gastos.loc[revisar, "Importe €"].sum()), 2)),
         ("Documentos en la carpeta", len(docs)),
         ("Documentos sin ningún gasto (revisar)", int(sin_doc.sum())),
         ("Documentos que son copia/otra versión de otro", int(copias.sum())),
@@ -159,8 +181,9 @@ def escribir_excel(ruta: Path, proyecto: str, resultados: list[Resultado], docum
     visibles = [c for c in gastos.columns if not c.startswith("_")]
     hojas = [
         ("Resumen", resumen, None, None, None),
-        ("Gastos", gastos[visibles], "Confianza", "Documento", gastos["_ubicacion"]),
-        ("Sin justificante", gastos.loc[~con, visibles], None, None, None),
+        ("Gastos", gastos[visibles], ["Confianza", "Estado"], "Documento", gastos["_ubicacion"]),
+        ("Sin justificante", gastos.loc[revisar, visibles], None, None, None),
+        ("Cofinanciación e indirectos", gastos.loc[cofin | indir, visibles], "Estado", None, None),
         ("Documentos", docs[["Documento", "Gastos asignados", "Importe asignado €", "Observación", "Ruta"]], None, "Documento", docs["_ubicacion"]),
         ("Documentos sin gasto", docs.loc[sin_doc, ["Documento", "Ruta"]], None, "Documento", docs.loc[sin_doc, "_ubicacion"]),
     ]

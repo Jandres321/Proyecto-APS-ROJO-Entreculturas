@@ -25,6 +25,13 @@ listado:
     descripcion: 5
     importe_eur: 7
     pago: 10
+  # Importe imputado al donante (Xunta) y a otros financiadores: si todo va a otros,
+  # el gasto es cofinanciación y no se espera su documento en la carpeta del donante
+  imputacion:
+    donante: [11]
+    otros: [12, 13]
+  # Partidas de costes indirectos (se justifican con certificado, no con facturas)
+  partidas_indirectos: '^B[\.\s]'
   # Una fila es un gasto si tiene fecha y nº de factura
   obligatorias: [fecha, factura]
 

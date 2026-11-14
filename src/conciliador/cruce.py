@@ -85,13 +85,14 @@ def _frase_concepto(sim: float) -> str:
 
 class Conciliador:
     def __init__(self, cfg_cruce: dict | None, cfg_referencias: dict, patron_prefijo: str | None,
-                 sinonimos: dict | None = None):
+                 sinonimos: dict | None = None, partidas_indirectos: str | None = None):
         self.p = {**DEFECTOS, **(cfg_cruce or {})}
         self.re_ref = re.compile(cfg_referencias["patron"])
         self.num_largos = bool(cfg_referencias.get("numeros_largos", False))
         self.re_prefijo = re.compile(patron_prefijo) if patron_prefijo else None
         self.sin = preparar_sinonimos(sinonimos)
         self._docs_por_ref: dict[str, int] = {}
+        self.re_indirectos = re.compile(partidas_indirectos, re.IGNORECASE) if partidas_indirectos else None
         self.mes_vencido = {texto_concepto(c, self.re_ref, self.sin) for c in self.p["conceptos_mes_vencido"]}
 
     # ---------- preparación ----------
@@ -174,6 +175,16 @@ class Conciliador:
 
         return Candidato(documento=d, puntuacion=round(puntos, 4), motivos=motivos)
 
+    def clasificar_sin_justificante(self, g: Gasto) -> str:
+        """Por qué un gasto puede no tener documento en la carpeta del donante."""
+        # Imputado entero a otros financiadores: cofinanciación, no se presenta al donante
+        if (g.imputado_otros or 0) > 0 and not (g.imputado_donante or 0):
+            return "cofinanciacion"
+        # Costes indirectos: se suelen justificar con un certificado de la entidad
+        if self.re_indirectos and self.re_indirectos.search(g.partida):
+            return "indirecto"
+        return "revisar"
+
     # ---------- cruce ----------
     def conciliar(self, gastos: list[Gasto], documentos: list[Documento]) -> list[Resultado]:
         docs = [self.preparar_documento(d) for d in documentos]
@@ -194,7 +205,8 @@ class Conciliador:
                 return (doc.texto, frozenset(doc.meses), frozenset(doc.refs))
             segundo = next((c for c in cands[1:] if firma(c.documento) != firma(mejor.documento)), None) if mejor else None
             if mejor is None or mejor.puntuacion < self.p["umbral"]:
-                resultados.append(Resultado(g, mejor, segundo, "sin_justificante", ""))
+                resultados.append(Resultado(g, mejor, segundo, "sin_justificante", "",
+                                            clasificacion=self.clasificar_sin_justificante(g)))
                 continue
             ambiguo = bool(segundo and mejor.puntuacion - segundo.puntuacion < self.p["margen_ambiguo"])
             if ambiguo:
