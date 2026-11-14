@@ -1,0 +1,78 @@
+# Tercer caso: 21-CO-035 Gobierno de La Rioja (Colombia). Caso difícil para el cruce por nombre:
+# los 19 PDF de muestra se llaman SOLO por su nº de orden (AC-07, D-30, PL-02, STP-01...), así que
+# el nombre no dice nada del concepto. El nº de orden se oculta al cruzar y se usa solo para validar.
+# El listado es la hoja "CUAD 3" del Anexo 3 (informe económico de la Comunidad Autónoma de La Rioja).
+proyecto: "21-CO-035 Gobierno de La Rioja (Colombia)"
+
+documentos:
+  tipo: local
+  ruta: "TUM_SociAI/DocJustificativa/21-CO-035 Gobierno de la Rioja"
+  # Documentos de la carpeta que no son justificantes de gasto
+  excluir:
+    - "Bases reguladoras*"
+    - "Copia de Anexo*"
+    - "Presupuesto*"
+
+listado:
+  # Con comodín (*): el nombre real lleva la tilde de "Económico" mal codificada al descomprimir
+  archivo: "TUM_SociAI/DocJustificativa/21-CO-035 Gobierno de la Rioja/Copia de Anexo 3*Rioja ajustado.xlsx"
+  hoja: "CUAD 3"
+  # Columnas por posición (0 = A)
+  columnas:
+    partida: 1
+    orden: 4          # Nº ORDEN (AC-7, PL-12...) -> SOLO para validar, el cruce no lo usa
+    factura: 6        # Nº factura: vacío en muchos gastos (nóminas, anticipos)
+    fecha: 7          # Fecha de expedición
+    proveedor: 8
+    descripcion: 9    # Concepto
+    pago: 11          # Medio de pago
+    fecha_pago: 12    # Fecha de pago: los comprobantes suelen llevar esta fecha y no la de expedición
+    importe_local: 28 # Coste total en moneda local (pesos): se compara con el total leído en el documento
+    importe_eur: 29   # Coste total en euros
+  # Importe imputado a la Comunidad Autónoma de La Rioja (CAR, euros) y a otros financiadores
+  # (ONGD y otros, en efectivo y valorizados): si todo va a otros, es cofinanciación
+  imputacion:
+    donante: [18]
+    otros: [19, 20, 25, 26]
+  # Gastos administrativos y de funcionamiento (partida B): se justifican con certificado
+  partidas_indirectos: '^B[\.\s]'
+  # Una fila es un gasto si tiene fecha (muchos gastos no llevan nº de factura)
+  obligatorias: [fecha]
+
+referencias:
+  # Los nombres de archivo no llevan nº de factura; este patrón solo sirve para limpiar los textos
+  patron: '(?<![A-Z0-9])(?P<prefijo>[A-Z]{1,3})[\s\-_]*(?P<numero>\d{3,})'
+  numeros_largos: false
+
+# Nº de orden manual = nombre del archivo: "AC-07.pdf" -> AC-7. El cruce lo OCULTA; la validación lo usa.
+prefijo_orden: '^(?P<prefijo>[A-Za-z]+)-(?P<desde>\d+)(?=[\s._]|$)'
+
+# Mismos pesos y umbrales que Uganda y ECHO (sin ajustar a este proyecto)
+cruce:
+  umbral: 0.60
+  umbral_alta: 0.80
+  margen_ambiguo: 0.05
+  bonus_mes: 0.08
+  bonus_mes_anterior: 0.04
+  penalizacion_mes: 0.25
+  bonus_referencia: 0.35
+  minimo_referencia: 0.62
+  bonus_numero: 0.20
+  penalizacion_referencia: 0.15
+  conceptos_mes_vencido: []
+
+# Lectura del CONTENIDO con la API de Claude (opcional). Aquí es la única forma de cruzar, porque
+# el nombre no dice nada. OJO: envía los documentos a un servicio externo; no activar con documentos
+# reales hasta que Entreculturas apruebe el proveedor. También se activa con --contenido.
+contenido:
+  activado: false
+  modelo: claude-sonnet-5-5
+  max_paginas: 2
+  max_documentos: 25
+  # Los PL-* son desprendibles de nómina (datos personales): se cruzan, pero NO se envían a la API
+  excluir: ["PL-*"]
+
+sinonimos:
+  salario: [nomina, payroll, salary, wage, desprendible]
+  combustible: [fuel, gasolina]
+  comision: [fee, charge]

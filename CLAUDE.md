@@ -104,3 +104,21 @@ Hay que tratarlos como imágenes (render con PyMuPDF → LLM multimodal) y detec
 - **Nunca commitear** datos de `DATA_DIR` ni `.env`.
 - Tests con **pytest**; los tests que usan datos reales se **saltan si `DATA_DIR` no existe**.
 - Código y comentarios en **inglés**; textos de cara al usuario en **español**.
+
+## Repositorio integrado: dos piezas
+
+Este repositorio junta dos trabajos del mismo reto (rama `integracion-revisor`):
+
+| Pieza | Carpetas | Qué es | Convenciones |
+|---|---|---|---|
+| **Revisor de justificación** (este documento) | `backend/`, `frontend/`, `docker-compose.yml`, `Makefile` | La aplicación: API, base de datos, lectura de PDF, cruce híbrido, reglas, presupuesto y app de revisión. **Es la interfaz que se mantiene** | Código y comentarios en inglés; textos al usuario en español |
+| **Conciliador** (línea de comandos) | `src/conciliador/`, `config/`, `tests/`, `pyproject.toml` de la raíz | El conciliador original por nombre de archivo, con lectura del contenido con Claude, Google Drive y un YAML por proyecto (Uganda, ECHO, La Rioja). Documentado en [docs/conciliador.md](docs/conciliador.md) | Código, comentarios y mensajes en español (ver `AGENTS.md`) |
+
+- `backend/app/pipeline/conciliador.py` es un **port** de `src/conciliador/cruce.py`. Si se corrige la lógica
+  del cruce por nombre en uno, hay que llevar el cambio al otro (y a sus tests).
+- Lo nuevo va al backend. El conciliador de `src/` se mantiene mientras tenga funciones que el backend no
+  tiene (ECHO, La Rioja, Drive, YAML por proyecto); ver el estado en el README.
+- Las reglas de datos y de claves de `AGENTS.md` valen para las dos piezas.
+
+@AGENTS.md
+

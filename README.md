@@ -4,6 +4,16 @@ Herramienta de apoyo a la revisión de la justificación económica de proyectos
 (Fundación Entreculturas · hackatón IA4GOOD). La IA **señala** incidencias con explicación; un
 técnico las **acepta o descarta**. Salida principal: Excel. Contexto completo en [CLAUDE.md](CLAUDE.md).
 
+## Este repositorio integra dos piezas
+
+| Pieza | Dónde | Para qué |
+|---|---|---|
+| **Revisor de justificación** | `backend/`, `frontend/` | La aplicación descrita en este README: lectura de PDF, cruce híbrido, reglas del donante, presupuesto y app de revisión (Streamlit) |
+| **Conciliador** (línea de comandos) | `src/conciliador/`, `config/`, `tests/` | El conciliador original, con un YAML por proyecto (Uganda, ECHO, La Rioja), lectura del contenido con Claude y Google Drive. Ver [docs/conciliador.md](docs/conciliador.md) |
+
+El cruce por nombre del backend (`pipeline/conciliador.py`) es un port del conciliador. El estado de la
+integración está en [Integración con el conciliador](#integración-con-el-conciliador).
+
 ## Arranque rápido
 
 Requisitos: Docker Desktop (con Compose v2).

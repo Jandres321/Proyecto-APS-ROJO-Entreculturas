@@ -1,4 +1,4 @@
-# Confidential data — never commit
+# Confidential data — never commit (datos personales y financieros de Entreculturas)
 TUM_SociAI/
 TUM_SociAI*.zip
 data/
@@ -6,11 +6,24 @@ cache/
 *.xls
 *.xlsx
 *.pdf
+# El enunciado oficial del reto sí se versiona
+!Reto Entreculturas-1.pdf
+
+# Salidas generadas por el conciliador (Excel y caché de lecturas: contienen datos reales)
+output/
+
+# Contexto interno para chats (no subir)
+CONTEXTO.md
 
 # Secrets
 .env
 .env.*
 !.env.example
+*.key
+.secrets/
+credentials*.json
+token*.json
+client_secret*.json
 
 # Python
 __pycache__/
@@ -34,3 +47,4 @@ dist/
 .idea/
 .DS_Store
 Thumbs.db
+~$*

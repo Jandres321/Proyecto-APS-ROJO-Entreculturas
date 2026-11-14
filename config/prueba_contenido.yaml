@@ -1,0 +1,90 @@
+# PRUEBA de la lectura del contenido con POCAS facturas (ver README, sección 7).
+# Es el YAML de Uganda con dos diferencias: los documentos salen de una carpeta pequeña que eliges tú
+# (solo esos archivos se envían a la API) y la lectura está activada con un tope bajo de llamadas.
+# Las rutas son relativas a la raíz del repositorio.
+proyecto: "PRUEBA lectura de contenido (Uganda, pocas facturas)"
+
+documentos:
+  tipo: local
+  ruta: "TUM_SociAI/prueba_contenido"
+  # Documentos de la carpeta que no son justificantes de gasto
+  excluir:
+    - "Informe_economico_final*"
+    - "Anuncio*"
+    - "2024_formulario*"
+    - "2024_guia*"
+
+listado:
+  archivo: "TUM_SociAI/DocJustificativa/24-UG-226 Adjumani - Xunta 2024/Informe_economico_final_Adjuamni_def 14.10.25 v1.xls"
+  hoja: "Relación de facturas"
+  # Columnas por posición (0 = A). Las cabeceras de la Xunta son bilingües y largas.
+  columnas:
+    partida: 0
+    orden: 1          # nº de orden puesto a mano -> SOLO para validar, el cruce no lo usa
+    fecha: 2
+    factura: 3
+    proveedor: 4
+    descripcion: 5
+    importe_local: 6  # importe en moneda local: se compara con el total leído en el documento
+    importe_eur: 7
+    pago: 10
+  # Importe imputado al donante (Xunta) y a otros financiadores: si todo va a otros,
+  # el gasto es cofinanciación y no se espera su documento en la carpeta del donante
+  imputacion:
+    donante: [11]
+    otros: [12, 13]
+  # Partidas de costes indirectos (se justifican con certificado, no con facturas)
+  partidas_indirectos: '^B[\.\s]'
+  # Una fila es un gasto si tiene fecha y nº de factura
+  obligatorias: [fecha, factura]
+
+referencias:
+  # Nº de factura/comprobante de JRS Uganda: EB UGA04 602, FP UGA04 108, CV UGA04-113, EBUGA04-060...
+  patron: '(?<![A-Z])(?P<prefijo>[A-Z]{2}(?:\s*CAM)?)[\s\-_]*UGA\d{2}[\s\-_]*(?P<numero>\d+)'
+  # Además, cualquier número de 5+ cifras se trata como referencia (p. ej. nº de factura 46681)
+  numeros_largos: true
+
+# Nº de orden manual al inicio del nombre del archivo: "1. ", "10.A ", "49A ", "33-39 "
+# El cruce lo OCULTA; la validación lo usa como respuesta correcta.
+prefijo_orden: '^(?P<desde>\d+)(?:-(?P<hasta>\d+))?(?:\.?\s?(?P<sufijo>[A-Za-z])(?=[\s._]))?(?=[\s.])\.?'
+
+cruce:
+  umbral: 0.60          # por debajo -> gasto sin justificante
+  umbral_alta: 0.80     # por encima (y sin ambigüedad) -> confianza alta
+  margen_ambiguo: 0.05  # si el 2º candidato está a menos -> ambiguo, revisar
+  bonus_mes: 0.08       # el documento menciona el mes del gasto
+  bonus_mes_anterior: 0.04   # ...o el mes anterior (cotizaciones que se pagan al mes siguiente)
+  penalizacion_mes: 0.25     # el documento menciona otro mes
+  bonus_referencia: 0.35     # el nº de factura del listado aparece en el nombre del archivo
+  minimo_referencia: 0.62    # con referencia coincidente se asigna aunque el concepto difiera
+  bonus_numero: 0.20         # coincide el número pero no el prefijo (EB/CV/FP)
+  penalizacion_referencia: 0.15  # ambos tienen nº de factura y no coinciden
+  # Cotizaciones que se pagan el mes siguiente: el documento lleva el mes anterior a la fecha de pago
+  conceptos_mes_vencido: [nssf, pension, seguro medico]
+
+# Lectura del CONTENIDO de los documentos con la API de Claude (opcional, ver README sección 5).
+# OJO: envía los documentos a un servicio externo. No activar con documentos reales hasta que
+# Entreculturas apruebe el proveedor. También se activa con la opción --contenido.
+contenido:
+  activado: true
+  modelo: claude-sonnet-5-5
+  max_paginas: 5        # páginas que se leen de cada PDF
+  max_documentos: 5     # tope de llamadas a la API: como mucho se leen 5 documentos
+  candidatos: 3         # documentos candidatos que se leen por cada gasto dudoso
+  bonus_importe: 0.40         # el importe del gasto coincide con el total del documento
+  tolerancia_importe: 0.01    # diferencia relativa admitida (1 %)
+  bonus_factura: 0.35         # dentro del documento se lee el nº de factura del gasto
+  penalizacion_factura: 0.15  # dentro del documento se lee otro nº de factura
+  bonus_fecha: 0.10           # la fecha del documento está a ±dias_fecha de la del gasto
+  dias_fecha: 3
+  bonus_proveedor: 0.10       # el proveedor del documento se parece al del gasto
+  similitud_proveedor: 80     # parecido mínimo (0-100)
+
+# Sinónimos del dominio (se comparan tras quitar acentos y plurales)
+sinonimos:
+  salario: [nomina, payroll, salary, wage]
+  seguro: [insurance]
+  combustible: [fuel]
+  vehiculo: [motocicleta, moto, vehicle]
+  refrigerio: [aperitivo, snack]
+  comision: [fee, charge]

@@ -1,0 +1,3 @@
+# Las dependencias se declaran en pyproject.toml. Este archivo instala el proyecto con todos
+# los extras: tests (dev), Google Drive (drive) y lectura del contenido (contenido).
+-e .[dev,drive,contenido]
