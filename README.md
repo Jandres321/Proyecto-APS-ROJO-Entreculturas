@@ -35,17 +35,76 @@ Limitaciones conocidas: validado solo con 10 facturas, reglas exclusivas de un d
 
 | Fase | Descripción | Estado |
 |---|---|---|
-| 1 | Pipeline en Python del proceso 1: PDF → LLM con visión → JSON con campos y tipo de documento → evaluación por reglas → Excel de incidencias | Pendiente |
-| 2 | Evaluación con un caso real etiquetado (incidencias del revisor externo y respuestas de Entreculturas, proyecto Xunta – Tigray) | Pendiente |
-| 3 | Proceso 2 para un donante: comparación presupuesto aprobado vs. informe económico por partida y comprobación de topes | Pendiente |
-| 4 | Reglas configurables por donante/proyecto | Futuro |
+| 0 | **Conciliador gasto ↔ justificante** por nombre de archivo, sin IA (piloto: Uganda) | ✅ Prueba de concepto |
+| 1 | Verificar importe y fecha leyendo la primera página del PDF (LLM con visión) | Pendiente |
+| 2 | Revisión de justificantes contra reglas del donante (proceso 1) y evaluación con las incidencias reales de Tigray | Pendiente |
+| 3 | Proceso 2: presupuesto aprobado vs. informe económico por partida y comprobación de topes | Pendiente |
+| 4 | Fuente de documentos en Google Drive (permiso de solo metadatos) | Pendiente |
+
+## Conciliador gasto ↔ justificante
+
+Asocia cada línea del listado de gastos con el documento que la justifica, usando **solo el nombre de los archivos**: no abre los PDF ni usa IA. Genera un Excel para revisión humana con:
+
+- **Gastos**: cada gasto con su documento, puntuación, nivel de confianza (alta / media / baja) y el motivo del emparejamiento.
+- **Sin justificante**: gastos para los que no se ha encontrado documento.
+- **Documentos**: cada archivo, cuántos gastos cubre y si es copia u otra versión de otro.
+- **Documentos sin gasto**: archivos que no corresponden a ninguna línea del listado.
+- **Validación** (opcional): comparación con la numeración manual.
+
+### Cómo cruza
+
+1. **Oculta el nº de orden manual** del nombre del archivo ("1. ", "10.A ", "33-39 "). Esa numeración es el trabajo ya hecho a mano, así que el algoritmo no la ve; solo se usa para validar.
+2. **Referencia de factura** (EB UGA04 602, FP UGA04 108…) presente en el listado y en el nombre del archivo.
+3. **Concepto**: cuánto del nombre del archivo está en el gasto y cuánto de la descripción del gasto explica el archivo. Se comparan sin acentos, en singular y con sinónimos del dominio (nómina = salario…).
+4. **Mes**: el que nombra el archivo frente al de la descripción o la fecha del gasto. Las cotizaciones se nombran por el mes que cubren, que es el anterior a la fecha de pago.
+5. Si el segundo mejor candidato está muy cerca, el gasto se marca como **ambiguo** (confianza baja) para revisarlo.
+
+Todo lo específico de cada proyecto (columnas del listado, formato de las referencias, pesos y umbrales, sinónimos) está en un YAML en `config/`. Un proyecto nuevo es un YAML nuevo.
+
+### Uso
+
+```bash
+pip install -e ".[dev]"            # o: pip install -r requirements.txt
+python -m conciliador config/uganda_adjumani.yaml --validar
+# -> output/uganda_adjumani.xlsx
+python -m pytest                   # tests
+```
+
+Sin instalar el paquete: `PYTHONPATH=src python -m conciliador ...`
+
+### Resultados del piloto (Uganda – Adjumani, Xunta 2024)
+
+203 gastos y 96 documentos. Se valida con los 181 gastos que tienen nº de orden manual.
+
+| Métrica | Resultado |
+|---|---|
+| Exactitud | 89,5 % (162/181) |
+| Precisión de lo asignado | 93,1 % |
+| Acierto con confianza **alta** | 78/78 (100 %) |
+| Acierto con confianza **media** | 54/54 (100 %) |
+| Acierto con confianza **baja** | 30/42 (71 %): la herramienta avisa de que hay que revisarlos |
+
+Los errores que quedan son ambigüedades reales del propio nombrado. Por ejemplo, las cotizaciones de diciembre están nombradas por el mes de pago y no por el mes que cubren, al contrario que en el resto del año. También aparecen hallazgos útiles: documentos en la carpeta que no están en el listado y gastos sin justificante.
+
+> Los pesos se ajustaron sobre este mismo proyecto, así que el resultado es optimista. El siguiente paso es probarlo en otro proyecto sin retocar el código, solo con su YAML.
 
 ## Estructura del repositorio
 
 ```
 .
-├── README.md
-├── .gitignore
+├── config/
+│   └── uganda_adjumani.yaml   # Configuración del proyecto piloto
+├── src/conciliador/
+│   ├── __main__.py            # CLI
+│   ├── listado.py             # Lectura del listado de gastos (.xls/.xlsx)
+│   ├── fuentes.py             # Origen de documentos (carpeta local; Drive más adelante)
+│   ├── texto.py               # Normalización, referencias, meses, sinónimos
+│   ├── cruce.py               # Motor de cruce y puntuación
+│   ├── validacion.py          # Métricas contra la numeración manual
+│   └── salida.py              # Excel de resultados
+├── tests/
+├── output/                    # Resultados generados (no se versiona)
+├── pyproject.toml / requirements.txt
 └── Reto Entreculturas-1.pdf   # Descripción oficial del reto
 ```
 
