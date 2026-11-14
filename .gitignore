@@ -1,0 +1,20 @@
+# Documentación confidencial de Entreculturas y prototipo TUM (datos personales y financieros: no subir)
+TUM_SociAI/
+
+# Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+
+# Secretos y configuración local
+.env
+*.key
+
+# Salidas generadas
+output/
+
+# Sistema
+.DS_Store
+Thumbs.db
+~$*
