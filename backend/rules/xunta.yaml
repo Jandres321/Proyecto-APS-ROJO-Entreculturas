@@ -1,0 +1,182 @@
+# Reglas de comprobación de justificantes · Xunta de Galicia (Acción humanitaria).
+#
+# Origen:
+#   - Prototipo/Rules.xlsx (hojas "test" y "hardcoded", prototipo TUM): `params.sources` indica la
+#     regla original de la que sale cada comprobación.
+#   - Orden de convocatoria AH 2024 (DOG núm. 91, 10/05/2024), art. 19.5 (págs. 28377-28378) y
+#     Anexo IV (pág. 44): sello-diligencia, pagos en efectivo, recibos, relación de gastos.
+#   - Reto Entreculturas (proceso 1): incidencias frecuentes y soportes complementarios.
+#
+# Formato y significado de cada campo: ver app/rules.py. Las comprobaciones que implementan estas
+# reglas están en app/pipeline/checks.py; aquí solo viven los umbrales y requisitos.
+
+donor: xunta
+
+rules:
+  - code: AMOUNT_MISMATCH
+    description: >-
+      El importe que figura en el justificante debe coincidir con el del listado de gastos
+      (en moneda local, en euros o la parte imputada al donante).
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Rules.xlsx (documentation_match, local_currency_clarity); Orden AH 2024, Anexo IV
+      (relación de gastos con el importe en moneda local y su equivalente en euros).
+    severity: high
+    params:
+      sources: [documentation_match, local_currency_clarity]
+      document_types: [factura, recibo, liquidacion]   # tipos de segmento que se comparan
+      tolerance_pct: 0.01                              # 1 % (redondeos, tipo de cambio)
+      tolerance_abs: 1                                 # o 1 unidad de la moneda
+
+  - code: DATE_MISMATCH
+    description: >-
+      La fecha del justificante debe coincidir con la del listado de gastos y la fecha del
+      pago anotada en el listado debe coincidir con la del justificante bancario.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Rules.xlsx (invoice_date_identification, documentation_match); Orden AH 2024, Anexo IV
+      (fecha y forma de pago en la relación de gastos).
+    severity: medium
+    params:
+      sources: [invoice_date_identification, documentation_match]
+      document_types: [factura, recibo, liquidacion]
+      tolerance_days: 3
+      check_payment_date: true            # el listado de Xunta trae "<fecha> y con <forma de pago>"
+      payment_tolerance_days: 5
+
+  - code: DONOR_STAMP_MISSING
+    description: >-
+      Todos los justificantes originales llevan un sello-diligencia con la convocatoria anual, el
+      número de expediente, la referencia «Proyecto subvencionado por la Xunta de Galicia» y el
+      porcentaje que se imputa a cada financiador, que debe coincidir con el del listado.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Orden AH 2024, art. 19.5 (DOG 91, págs. 28377-28378); Rules.xlsx
+      (xunta_galicia_stamp_present, grant_call_reference_present, expedient_number_present_stamp,
+      project_funding_percentage_indicated).
+    severity: medium
+    params:
+      sources:
+        - xunta_galicia_stamp_present
+        - grant_call_reference_present
+        - expedient_number_present_stamp
+        - project_funding_percentage_indicated
+      document_types: [factura, recibo]
+      required_fields: [expediente]
+      percentage: always                  # siempre debe figurar el % (Rules.xlsx), no solo si es parcial
+      percentage_tolerance_points: 1.0    # puntos porcentuales respecto al listado
+      skip_cofinanced: true               # sin imputación al donante no hay sello que exigir
+
+  - code: NOT_AN_INVOICE
+    description: >-
+      El justificante debe ser una factura (o documento de valor probatorio equivalente) con su
+      número, el emisor y la fecha. Los recibos y las proformas solo valen en los casos que
+      admite la convocatoria.
+    kind: deterministic
+    applies_to_partidas: [A.I, A.II, A.III, A.IV, A.VI, A.VIII, A.IX, A.X]
+    reference: >-
+      Orden AH 2024, art. 19.5 (facturas, recibos de caja y su autorización previa);
+      Rules.xlsx (invoice_number_presence, issuer_identity_clear, invoice_date_identification).
+    severity: medium
+    params:
+      sources: [invoice_number_presence, issuer_identity_clear, invoice_date_identification]
+      invoice_types: [factura]
+      receipt_types: [recibo]
+      flag_receipts: true                 # un recibo exige autorización previa o acreditación
+      flag_proforma: true
+      required_fields: [numero_factura, emisor, fecha]
+      missing_fields_severity: low        # puede ser un fallo de lectura, no del justificante
+
+  - code: PAYMENT_EVIDENCE_MISSING
+    description: >-
+      Cada gasto necesita la prueba de su pago: el justificante bancario de la transferencia o,
+      si se pagó en efectivo, la factura firmada y sellada «pagado» por el proveedor.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Orden AH 2024, art. 19.5 y Anexo IV (documentación acreditativa del pago); Rules.xlsx
+      (proof_of_payment_attached, payment_method_stated, Cash receipt).
+    severity: high
+    params:
+      sources: [proof_of_payment_attached, payment_method_stated, Cash receipt]
+      proof_types: [transferencia]
+      accept_paid_stamp: true             # sello «pagado» / recibí en el propio justificante
+      cash_requires_paid_stamp: true
+      skip_partidas: [B]                  # los costes indirectos se acreditan con certificado
+      cash_words: [efectivo, metalico, cash, caja]
+      transfer_words: [transferencia, transfer, banco, bank, cheque]
+
+  - code: CASH_OVER_LIMIT
+    description: >-
+      Los pagos en efectivo solo se aceptan con carácter excepcional y por importe inferior a
+      1.000 euros, acompañados de un justificante del proveedor.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Orden AH 2024, art. 19.5 (DOG 91, pág. 28378) y art. 42.3 del Decreto 11/2009;
+      Rules.xlsx (Cash cap: FAIL si ≥ 1.000 EUR).
+    severity: high
+    params:
+      sources: [Cash cap]
+      limit_eur: 1000
+      inclusive: true                     # 1.000 € o más ya incumple
+      cash_words: [efectivo, metalico, cash, caja]
+
+  - code: ILLEGIBLE
+    description: >-
+      Los documentos del expediente tienen que poder leerse; si no, no se pueden comprobar.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Criterio de revisión de Entreculturas (Reto, proceso 1: «documentos ilegibles»); no figura
+      en Rules.xlsx ni en la convocatoria.
+    severity: medium
+    params:
+      min_ocr_confidence: 45
+      document_types: []                  # vacío = todos los tipos de segmento vinculados
+
+  - code: DUPLICATE_INVOICE
+    description: >-
+      Una misma factura no puede justificar dos veces el mismo gasto: ni aparecer en dos
+      documentos distintos, ni imputarse a varias líneas por más de su importe.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Criterio de revisión de Entreculturas (doble imputación, Reto proceso 1); no figura en
+      Rules.xlsx.
+    severity: high
+    params:
+      min_invoice_chars: 4                # nº de factura mínimo para compararlo
+      amount_tolerance_pct: 0.01
+      check_listing: true                 # misma factura + emisor + importe en dos líneas del listado
+      ignore_invoice_numbers: ["N/A", "NA", "S/N", "-"]
+
+  - code: DOC_INCOMPLETE
+    description: >-
+      El expediente del gasto debe incluir los documentos de soporte que corresponden a su tipo:
+      una nómina necesita contrato, pago y cotización; un refrigerio, la lista de asistencia.
+    kind: doc_requirement
+    applies_to_partidas: []
+    reference: >-
+      Reto Entreculturas (soportes complementarios: nóminas, contratos, listas de asistencia);
+      Orden AH 2024, art. 19.5 (acreditación del pago).
+    severity: medium
+    params:
+      requirements:
+        - name: nomina
+          label: gasto de personal (nómina)
+          applies_to_partidas: [A.V]
+          keywords: [salario, salarios, salary, nomina, payroll, sueldo, wage]
+          requires:
+            - {id: contrato, label: contrato de trabajo, segment_types: [contrato]}
+            - {id: pago, label: justificante de pago, segment_types: [transferencia], flags: [prueba_pago]}
+            - {id: cotizacion, label: pago o boletín de cotización a la seguridad social, flags: [cotizacion]}
+        - name: refrigerio
+          label: refrigerios o alimentación de una actividad
+          applies_to_partidas: []
+          keywords: [refrigerio, refrigerios, refreshment, refreshments, snack, snacks, catering, almuerzo, lunch]
+          requires:
+            - {id: lista_asistencia, label: lista de asistencia firmada, segment_types: [lista_asistencia]}

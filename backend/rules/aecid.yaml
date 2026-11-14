@@ -1,0 +1,175 @@
+# Reglas de comprobación de justificantes · AECID (convenios, proyectos y acciones de ONGD).
+#
+# Origen: Guía de aplicación de las Normas de gestión, seguimiento y justificación de convenios y
+# proyectos de ONGD y de acciones (versión noviembre 2019). Los apartados citados llevan el código
+# de la norma entre paréntesis, p. ej. (R11-VII.5), y la página de la Guía (la numeración de la
+# Guía coincide con la del PDF).
+#
+# Estas reglas no salen de Rules.xlsx (que es solo de Xunta). Reto Entreculturas (proceso 1) aporta
+# el catálogo de incidencias frecuentes.
+#
+# Formato y significado de cada campo: ver app/rules.py. Las comprobaciones que implementan estas
+# reglas están en app/pipeline/checks.py; aquí solo viven los umbrales y requisitos.
+
+donor: aecid
+
+rules:
+  - code: AMOUNT_MISMATCH
+    description: >-
+      El importe del justificante debe coincidir con el del listado de comprobantes (en moneda
+      local, en euros o la parte imputada a la AECID).
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Guía AECID, 11.1 (R11-VII.2.1), pág. 90: cada justificante lleva el número con el que figura
+      en el listado general de gastos.
+    severity: high
+    params:
+      document_types: [factura, recibo, liquidacion]
+      tolerance_pct: 0.01
+      tolerance_abs: 1
+
+  - code: DATE_MISMATCH
+    description: >-
+      La fecha del justificante debe coincidir con la del listado de comprobantes. La fecha del
+      justificante y la del pago deben caer dentro del periodo de ejecución y justificación.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Guía AECID, 10.6 (R11-VII.1.6), pág. 88: fechas de justificantes y pagos; 11.1, pág. 90:
+      numeración según el listado general de gastos.
+    severity: medium
+    params:
+      document_types: [factura, recibo, liquidacion]
+      tolerance_days: 3
+      check_payment_date: false           # el listado AECID no recoge la fecha de pago
+      payment_tolerance_days: 5
+
+  - code: DONOR_STAMP_MISSING
+    description: >-
+      Todos los justificantes originales llevan el sello-diligencia con el código del convenio,
+      proyecto o acción, la leyenda «financiado por la AECID» y, si la AECID no cubre todo el
+      importe, el porcentaje de financiación.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Guía AECID, 11.1 (R11-VII.2.1), pág. 90: sello-diligencia y numeración de justificantes.
+    severity: medium
+    params:
+      document_types: [factura, recibo]
+      required_fields: [expediente]       # código del convenio, proyecto o acción
+      percentage: when_partial            # solo si la subvención no cubre la totalidad
+      percentage_tolerance_points: 1.0
+      skip_cofinanced: true
+
+  - code: NOT_AN_INVOICE
+    description: >-
+      El justificante debe ser una factura u otro documento de tráfico legal, con su número,
+      el emisor y la fecha. Los recibos solo se admiten con autorización previa de la AECID o si
+      la legislación local lo permite.
+    kind: deterministic
+    applies_to_partidas: [A.I.1, A.I.2, A.I.3, A.I.4, A.I.5, A.II]
+    reference: >-
+      Guía AECID, 11.2 (R11-VII.3.1), págs. 93-94: requisitos de las facturas y recibos;
+      11.1, pág. 92 (R11-VII.2.5): no se admiten gastos autofacturados.
+    severity: medium
+    params:
+      invoice_types: [factura]
+      receipt_types: [recibo]
+      flag_receipts: true
+      flag_proforma: true
+      required_fields: [numero_factura, emisor, fecha]
+      missing_fields_severity: low
+
+  - code: PAYMENT_EVIDENCE_MISSING
+    description: >-
+      Cada gasto necesita la prueba de su pago: extracto o comprobante bancario si se pagó por
+      transferencia o cheque, o «recibí» / factura sellada «pagado» si fue en efectivo.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Guía AECID, 10.7 (R11-VII.5), pág. 89: medios de pago y acreditación del pago (recibís o
+      extractos bancarios, siempre en transferencias y cheques).
+    severity: high
+    params:
+      proof_types: [transferencia]
+      accept_paid_stamp: true
+      # La Guía (pág. 167, nota sobre Paraguay) dice que el sello «pagado» en una factura de
+      # contado no es obligatorio allí: no se exige sello para pagos en efectivo.
+      cash_requires_paid_stamp: false
+      skip_partidas: [B]                  # costes indirectos: se acreditan con certificado
+      cash_words: [efectivo, metalico, cash, contado]
+      transfer_words: [transferencia, banco, cheque]
+
+  - code: CASH_OVER_LIMIT
+    description: >-
+      Los pagos superiores a 2.500 euros deben hacerse por transferencia bancaria, salvo
+      situaciones excepcionales motivadas en la cuenta justificativa. Los pagos en efectivo son
+      excepcionales.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Guía AECID, 10.7 (R11-VII.5), pág. 89 (límite de 2.500 euros fijado por el art. 7 de la
+      Ley 7/2012, nota 7 de la Guía).
+    severity: high
+    params:
+      limit_eur: 2500
+      inclusive: false                    # «superiores a 2.500 euros»
+      cash_words: [efectivo, metalico, cash]
+
+  - code: ILLEGIBLE
+    description: >-
+      Los documentos del expediente tienen que poder leerse; si no, no se pueden comprobar.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Criterio de revisión de Entreculturas (Reto, proceso 1: «documentos ilegibles»); la Guía no
+      lo regula expresamente.
+    severity: medium
+    params:
+      min_ocr_confidence: 45
+      document_types: []
+
+  - code: DUPLICATE_INVOICE
+    description: >-
+      Una misma factura no puede justificar dos veces el mismo gasto: ni aparecer en dos
+      documentos distintos, ni imputarse a varias líneas por más de su importe.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Criterio de revisión de Entreculturas (doble imputación, Reto proceso 1); la Guía exige que
+      cada justificante lleve un único número del listado (11.1, pág. 90).
+    severity: high
+    params:
+      min_invoice_chars: 4
+      amount_tolerance_pct: 0.01
+      check_listing: false                # el listado AECID no trae el nº de factura
+      ignore_invoice_numbers: ["N/A", "NA", "S/N", "-"]
+
+  - code: DOC_INCOMPLETE
+    description: >-
+      El expediente del gasto debe incluir los documentos de soporte que corresponden a su tipo:
+      una nómina necesita contrato, pago y cotización; un refrigerio, la lista de participantes.
+    kind: doc_requirement
+    applies_to_partidas: []
+    reference: >-
+      Guía AECID, 11.4 (R11-VII.4.2.6), pág. 117: personal (contrato, nóminas firmadas, recibos y
+      boletines de cotización a la Seguridad Social, que pueden sustituirse por certificación de
+      estar al corriente); 11.4 (R11-VII.4.2.9), pág. 122: listado de participantes firmado.
+    severity: medium
+    params:
+      requirements:
+        - name: nomina
+          label: gasto de personal (nómina)
+          applies_to_partidas: [A.I.6.1, A.I.6.2, A.I.6.3]
+          keywords: [salario, salarios, nomina, sueldo, aguinaldo, planilla, payroll]
+          requires:
+            - {id: contrato, label: contrato de trabajo, segment_types: [contrato]}
+            - {id: pago, label: justificante de pago, segment_types: [transferencia], flags: [prueba_pago]}
+            - {id: cotizacion, label: pago o certificación de cotización a la seguridad social, flags: [cotizacion]}
+        - name: refrigerio
+          label: refrigerios o alimentación de una actividad
+          applies_to_partidas: []
+          keywords: [refrigerio, refrigerios, merienda, snack, snacks, catering, almuerzo, alimentacion]
+          requires:
+            - {id: lista_asistencia, label: lista de participantes firmada, segment_types: [lista_asistencia]}

@@ -1,0 +1,74 @@
+services:
+  db:
+    image: postgres:16
+    environment:
+      POSTGRES_USER: revisor
+      POSTGRES_PASSWORD: revisor
+      POSTGRES_DB: revisor
+    ports:
+      - "5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U revisor -d revisor"]
+      interval: 3s
+      timeout: 3s
+      retries: 20
+
+  api:
+    build: ./backend
+    command: sh -c "alembic upgrade head && uvicorn app.main:app --host 0.0.0.0 --port 8000 --reload"
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://revisor:revisor@db:5432/revisor
+      DATA_DIR: /data
+      CACHE_DIR: /app/cache
+      CORS_ORIGINS: http://localhost:5173
+    ports:
+      - "8000:8000"
+    volumes:
+      - ./backend:/app
+      # Confidential dataset, read-only. Set DATA_DIR in .env (host path).
+      - ${DATA_DIR:-./data}:/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+
+  # Review app (Streamlit): runs the whole pipeline and lets the reviewer accept / discard findings.
+  ui:
+    build: ./backend
+    command: streamlit run ui/streamlit_app.py --server.address 0.0.0.0 --server.port 8501 --server.headless true
+    env_file:
+      - path: .env
+        required: false
+    environment:
+      DATABASE_URL: postgresql+psycopg://revisor:revisor@db:5432/revisor
+      DATA_DIR: /data
+      CACHE_DIR: /app/cache
+    ports:
+      - "8501:8501"
+    volumes:
+      - ./backend:/app
+      - ${DATA_DIR:-./data}:/data:ro
+    depends_on:
+      db:
+        condition: service_healthy
+      api:
+        condition: service_started
+
+  web:
+    build: ./frontend
+    environment:
+      VITE_API_URL: http://localhost:8000
+    ports:
+      - "5173:5173"
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+    depends_on:
+      - api
+
+volumes:
+  pgdata:

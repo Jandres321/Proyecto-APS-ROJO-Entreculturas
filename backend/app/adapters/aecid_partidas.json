@@ -1,0 +1,237 @@
+[
+  {
+    "code": "A.I.1",
+    "name": "Evaluación externa",
+    "definition": "Evaluaciones externas obligatorias o cuya financiación con cargo a la subvención haya sido aprobada por la AECID (ver apartado 9.4).",
+    "includes": [],
+    "excludes": [
+      "No son financiables gastos de personal de la entidad o sus socios, para tareas de evaluación, ya que sólo se financian evaluaciones EXTERNAS."
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.1"
+  },
+  {
+    "code": "A.I.2",
+    "name": "Auditorías",
+    "definition": "Auditorías externas obligatorias o cuya financiación con cargo a la subvención haya sido aprobada por la AECID (ver apartado 9.5).",
+    "includes": [],
+    "excludes": [],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.2"
+  },
+  {
+    "code": "A.I.3",
+    "name": "Otros servicios técnicos y profesionales",
+    "definition": "Los servicios requeridos para la realización de capacitaciones, seminarios, informes, publicaciones, control de gestión, asesorías jurídicas o financieras, notariales y registrales u otras necesidades, contempladas en la formulación o en sus modificaciones debidamente autorizadas, que no impliquen relación laboral y no puedan incluirse en otras partidas. Se incluyen en esta partida los gastos de identificación y formulación de convenios cuando se hayan realizado mediante contratación externa.",
+    "includes": [
+      "Los servicios requeridos para la realización de capacitaciones, seminarios, informes, publicaciones, control de gestión, asesorías jurídicas o financieras, notariales y registrales u otras necesidades, contempladas en la formulación o en…",
+      "Se incluyen en esta partida los gastos de identificación y formulación de convenios cuando se hayan realizado mediante contratación externa.",
+      "Gastos de traducción de documentos al español, cuando se requiera su presentación en ese idioma, o las traducciones de materiales imprescindibles para la ejecución de las actividades planificadas en la formulación.…"
+    ],
+    "excludes": [
+      "Auditorías y evaluaciones",
+      "Proyectos de obra, que se imputarán a la partida de “Construcción y reforma”"
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.7"
+  },
+  {
+    "code": "A.I.4",
+    "name": "Arrendamientos (de terrenos, inmuebles)",
+    "definition": "Alquiler de terrenos e inmuebles directamente relacionados con la ejecución: locales para capacitaciones u otras actividades de la intervención. La subvención no asume garantías ni indemnizaciones de arrendamiento.",
+    "includes": [
+      "alquiler de locales para capacitaciones u otras actividades de la intervención",
+      "valorización de alquileres aportados (solo si lo permite la convocatoria)"
+    ],
+    "excludes": [
+      "No incluye la compra o alquiler de sedes administrativas del adjudicatario, sus socios en agrupación o su socio local, que se consideran gastos indirectos.",
+      "No incluye la compra de viviendas del personal del adjudicatario, sus socios en agrupación o su socio local"
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.3"
+  },
+  {
+    "code": "A.I.5",
+    "name": "Materiales y suministros no inventariables",
+    "definition": "Adquisición y arrendamiento de materiales, suministros y equipos no inventariables (material de oficina e informático, insumos...), su reparación y mantenimiento, envío y tasas aduaneras. Incluye entregas en metálico o cupones a destinatarios cuyo componente principal sea la compra de materiales o insumos.",
+    "includes": [
+      "adquisiciones y arrendamiento de equipos y materiales, maquinaria, mobiliario, enseres, elementos de transporte, equipos y material informático (hardware y software) y material de oficina, directamente vinculados a la intervención",
+      "reparaciones y mantenimiento de los anteriores,",
+      "suministros ligados a los anteriores,",
+      "gastos derivados del envío, incluyendo tasas aduaneras, instalación y puesta en funcionamiento de los equipos, matriculación de vehículos",
+      "amortizaciones de equipos propiedad de la entidad o de su socio local puestos a disposición de la intervención",
+      "entregas no reembolsables en metálico a los destinatarios finales para la realización por sí mismos de determinadas actividades, cuyo componente principal de gasto sea la adquisición de equipos, materiales o insumos, incluida, si es el…",
+      "Valorización de equipos si son aportados por destinatarios finales o socios locales u otras entidades locales participantes (SÓLO SI LO PERMITE LA CONVOCATORIA)."
+    ],
+    "excludes": [
+      "No incluye equipos, materiales o suministros para el personal del adjudicatario, sus socios en agrupación o su socio local."
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.5"
+  },
+  {
+    "code": "A.I.6.1",
+    "name": "Personal local",
+    "definition": "Personal local: sometido a la legislación laboral del país donde se ejecuta la intervención y en el que presta sus servicios, siempre que este país sea de desarrollo.",
+    "includes": [],
+    "excludes": [
+      "NO SON FINANCIABLES LOS GASTOS DE PROCESOS DE SELECCIÓN DE PERSONAL",
+      "Penalizaciones o compensaciones por incumplimientos de contrato achacables a la entidad adjudicataria o sus socios,",
+      "Recargos por impago o retrasos en impuestos retenidos o seguridad social,",
+      "Gastos originados por los miembros de las juntas directivas o consejos de dirección de las entidades, en sus funciones de dirección.",
+      "Los gastos de selección de personal. La norma de la AECID no obliga a incurrir en estos gastos, luego deben correr por cuenta de la entidad que decide hacerlos.",
+      "Gastos de personal posteriores a la finalización de la ejecución, aunque realice tareas relacionadas con la presentación del informe final.…"
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.6"
+  },
+  {
+    "code": "A.I.6.2",
+    "name": "Personal expatriado",
+    "definition": "Personal expatriado: personal que presta sus servicios en el país de ejecución de la intervención, siempre que sea de desarrollo, con relación sometida a legislación laboral de un país distinto al de ejecución. Cuando esté sometida a la legislación española, será financiable sólo en caso de que se hayan cumplido las obligaciones derivadas del Estatuto de los cooperantes.",
+    "includes": [],
+    "excludes": [
+      "NO SON FINANCIABLES LOS GASTOS DE PROCESOS DE SELECCIÓN DE PERSONAL",
+      "Penalizaciones o compensaciones por incumplimientos de contrato achacables a la entidad adjudicataria o sus socios,",
+      "Recargos por impago o retrasos en impuestos retenidos o seguridad social,",
+      "Gastos originados por los miembros de las juntas directivas o consejos de dirección de las entidades, en sus funciones de dirección.",
+      "Los gastos de selección de personal. La norma de la AECID no obliga a incurrir en estos gastos, luego deben correr por cuenta de la entidad que decide hacerlos.",
+      "Gastos de personal posteriores a la finalización de la ejecución, aunque realice tareas relacionadas con la presentación del informe final.…"
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.6"
+  },
+  {
+    "code": "A.I.6.3",
+    "name": "Personal en sede",
+    "definition": "Personal en sede: presta sus servicios en el país en el que está ubicada la sede de la entidad adjudicataria, con relación sometida a la legislación del país en el que ésta reside, y cuyas funciones y tareas se correspondan con las de la puesta en ejecución y el seguimiento de la intervención objeto de subvención. Se dan dos casos:",
+    "includes": [],
+    "excludes": [
+      "NO SON FINANCIABLES LOS GASTOS DE PROCESOS DE SELECCIÓN DE PERSONAL",
+      "Penalizaciones o compensaciones por incumplimientos de contrato achacables a la entidad adjudicataria o sus socios,",
+      "Recargos por impago o retrasos en impuestos retenidos o seguridad social,",
+      "Gastos originados por los miembros de las juntas directivas o consejos de dirección de las entidades, en sus funciones de dirección.",
+      "Los gastos de selección de personal. La norma de la AECID no obliga a incurrir en estos gastos, luego deben correr por cuenta de la entidad que decide hacerlos.",
+      "Gastos de personal posteriores a la finalización de la ejecución, aunque realice tareas relacionadas con la presentación del informe final.…"
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.6"
+  },
+  {
+    "code": "A.I.6.4",
+    "name": "Personal voluntario",
+    "definition": "Personal voluntario: personal con relación basada en la Ley del Voluntariado, o su equivalente autonómico, con acuerdo de colaboración suscrito, en el que se identificarán los gastos a compensar, con tareas en países de desarrollo o de Educación para el Desarrollo en España. Deberá existir un acuerdo de colaboración equivalente, cuando la relación de voluntariado se haya establecido con una entidad no española.",
+    "includes": [],
+    "excludes": [
+      "NO SON FINANCIABLES LOS GASTOS DE PROCESOS DE SELECCIÓN DE PERSONAL",
+      "Penalizaciones o compensaciones por incumplimientos de contrato achacables a la entidad adjudicataria o sus socios,",
+      "Recargos por impago o retrasos en impuestos retenidos o seguridad social,",
+      "Gastos originados por los miembros de las juntas directivas o consejos de dirección de las entidades, en sus funciones de dirección.",
+      "Los gastos de selección de personal. La norma de la AECID no obliga a incurrir en estos gastos, luego deben correr por cuenta de la entidad que decide hacerlos.",
+      "Gastos de personal posteriores a la finalización de la ejecución, aunque realice tareas relacionadas con la presentación del informe final.…"
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.6"
+  },
+  {
+    "code": "A.I.7",
+    "name": "Viajes, alojamientos y dietas",
+    "definition": "Desplazamientos, viajes, estancias y dietas directamente relacionados con las actuaciones, realizados por personal vinculado a la intervención, personal en sede (seguimiento), voluntarios, destinatarios finales o servicios técnicos esporádicos. Incluye combustible, seguros y mantenimiento de vehículos de la entidad o del socio.",
+    "includes": [
+      "El personal vinculado laboralmente con las intervenciones,",
+      "El personal en sede, cuando tengan por objeto la realización de tareas relacionadas con el seguimiento de las intervenciones financiadas con la subvención,",
+      "Los voluntarios. En caso de voluntarios de los socios locales, para poder imputar gastos de viajes, alojamientos y dietas, deberá haberse suscrito con ellos un acuerdo de colaboración equivalente al que preceptivamente se exige en caso del…",
+      "Los destinatarios finales,",
+      "Los desplazamientos que se requieran para el desempeño de servicios técnicos y profesionales que sean esporádicos y no requieran de un contrato escrito (servicios esporádicos de profesores, abogados, notarios o tasadores).",
+      "Liquidación de dietas y gastos de movilidad individuales (modelo de la AECID disponible en su web): Sólo para personal con una relación laboral (expatriado, local o en sede).…",
+      "Desplazamientos colectivos: gastos de desplazamientos efectuados de forma colectiva (por personal, destinatarios finales u otros). Se imputan por los costes reales con listados de justificantes y sus facturas o recibos.",
+      "Otros (se justifican con justificantes individuales de gasto):",
+      "combustible, seguros y mantenimiento de vehículos específicamente identificados y vinculados a la intervención, es decir, que estén a nombre de la entidad adjudicataria o de su socio local, nunca de personas físicas, y que estén destinados…",
+      "desplazamientos de destinatarios finales individuales. Puede utilizarse en este caso el sistema de entrega de fondos a los destinatarios para la realización por sí mismos de determinadas actividades, descrito en el apartado 11.2 Recibos y…",
+      "desplazamientos que se requieran para la prestación de servicios técnicos y profesionales que no requieran de un contrato escrito (servicios esporádicos de formadores, etc.)",
+      "desplazamientos por motivos de trabajo (asistencia a reuniones, etc.) dentro del lugar de residencia habitual en el país de ejecución"
+    ],
+    "excludes": [
+      "No serán admisibles las liquidaciones genéricas a tanto alzado. Deberán referirse a desplazamientos concretos y realizarse individualmente para cada uno de ellos, indicando la ruta, las fechas, los objetivos del mismo y los medios de…",
+      "No son financiables los gastos diarios de desplazamiento del domicilio al trabajo, y viceversa, del personal al servicio del convenio, proyecto o acción."
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.9"
+  },
+  {
+    "code": "A.I.8",
+    "name": "Fondos rotatorios",
+    "definition": "Aporte económico para los préstamos del fondo, gastos de gestión y administración del fondo y gastos financieros ligados a él. Debe estar previsto en la formulación y no puede superar el 10 % de los gastos directos.",
+    "includes": [
+      "aporte económico para los préstamos",
+      "gastos de gestión y administración del Fondo,",
+      "gastos financieros y todos aquellos directamente ligados al Fondo, dentro del periodo de ejecución"
+    ],
+    "excludes": [],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.8"
+  },
+  {
+    "code": "A.I.9",
+    "name": "Gastos financieros",
+    "definition": "Gastos de transferencias bancarias entre cuentas a nombre de la intervención y de mantenimiento de esas cuentas. Deben ser indispensables y no derivar de malas prácticas o incumplimientos legales.",
+    "includes": [
+      "Gastos derivados de las transferencias bancarias de los fondos entre cuentas abiertas a nombre de la intervención",
+      "Gastos derivados del mantenimiento de cuentas abiertas a nombre de la intervención"
+    ],
+    "excludes": [],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.10"
+  },
+  {
+    "code": "A.II.1",
+    "name": "Adquisición de terrenos y/o inmuebles",
+    "definition": "Adquisición de terrenos e inmuebles directamente relacionados con la ejecución y su inscripción legal en los registros locales (impuestos, tasas, gastos notariales, licencias legales). Exige cumplir las normas de transferencia y vinculación.",
+    "includes": [
+      "compra de terrenos e inmuebles",
+      "impuestos, tasas y gastos notariales de la inscripción"
+    ],
+    "excludes": [
+      "No incluye la compra o alquiler de sedes administrativas del adjudicatario, sus socios en agrupación o su socio local, que se consideran gastos indirectos.",
+      "No incluye la compra de viviendas del personal del adjudicatario, sus socios en agrupación o su socio local"
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.3"
+  },
+  {
+    "code": "A.II.2.1",
+    "name": "Construcción y/o reforma de inmuebles e infraestructuras",
+    "definition": "Trabajos de construcción y reforma previstos en la intervención: mano de obra, materiales y su transporte, desescombrado, informes técnicos obligatorios, licencias, tasas, seguros obligatorios, proyectos y dirección de obra; obras de primer establecimiento, de reforma y de gran reparación.",
+    "includes": [
+      "mano de obra y materiales de construcción",
+      "obras de primer establecimiento y de reforma",
+      "entregas en metálico a destinatarios para autoconstrucción"
+    ],
+    "excludes": [],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.4"
+  },
+  {
+    "code": "A.II.2.2",
+    "name": "Trabajos y estudios técnicos de construcción",
+    "definition": "Trabajos y estudios técnicos ligados a la construcción: proyectos y dirección de obra, informes técnicos obligatorios, licencias y tasas.",
+    "includes": [
+      "proyectos y dirección de obra",
+      "informes técnicos obligatorios"
+    ],
+    "excludes": [],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.4"
+  },
+  {
+    "code": "A.II.3",
+    "name": "Equipos y materiales inventariables",
+    "definition": "Adquisición de equipos y materiales inventariables (maquinaria, mobiliario, enseres, elementos de transporte, equipos informáticos), con envío, instalación y puesta en funcionamiento. Requiere actas de transferencia y afectación de los bienes y, por encima de 15.000 euros, ofertas.",
+    "includes": [
+      "adquisiciones y arrendamiento de equipos y materiales, maquinaria, mobiliario, enseres, elementos de transporte, equipos y material informático (hardware y software) y material de oficina, directamente vinculados a la intervención",
+      "reparaciones y mantenimiento de los anteriores,",
+      "suministros ligados a los anteriores,",
+      "gastos derivados del envío, incluyendo tasas aduaneras, instalación y puesta en funcionamiento de los equipos, matriculación de vehículos",
+      "amortizaciones de equipos propiedad de la entidad o de su socio local puestos a disposición de la intervención",
+      "entregas no reembolsables en metálico a los destinatarios finales para la realización por sí mismos de determinadas actividades, cuyo componente principal de gasto sea la adquisición de equipos, materiales o insumos, incluida, si es el…",
+      "Valorización de equipos si son aportados por destinatarios finales o socios locales u otras entidades locales participantes (SÓLO SI LO PERMITE LA CONVOCATORIA)."
+    ],
+    "excludes": [
+      "No incluye equipos, materiales o suministros para el personal del adjudicatario, sus socios en agrupación o su socio local."
+    ],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.4, R11-VII.4.2.5"
+  },
+  {
+    "code": "B",
+    "name": "Costes indirectos",
+    "definition": "Son aquellos propios del funcionamiento regular de la entidad adjudicataria, sus socios en agrupación y sus socios locales, que sirven de sostén para la ejecución de la intervención. Se incluyen aquí los gastos dirigidos al fortalecimiento de las entidades adjudicatarias y sus socios locales para un mejor desempeño de sus funciones. Se imputarán los que correspondan al periodo de ejecución de la intervención. Los porcentajes de gastos indirectos autorizados por la normativa de la AECID son (OB11-13.3): Como máximo, el 12 por 100 de la subvención aprobada.…",
+    "includes": [],
+    "excludes": [],
+    "reference": "Guía AECID (versión nov. 2019), apartado 11.3 (OB11-13.3)"
+  }
+]
