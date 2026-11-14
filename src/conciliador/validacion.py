@@ -12,28 +12,39 @@ from dataclasses import dataclass
 from .modelos import Documento, Resultado
 
 
-def clave_orden(valor: str | None) -> str | None:
-    """'10.A' -> '10A', '69A' -> '69A', '7' -> '7', 'N/A' -> None."""
+def _clave(prefijo: str, numero: int, sufijo: str = "") -> str:
+    """('AC', 7, '') -> 'AC-7'; ('', 10, 'A') -> '10A'."""
+    return f"{prefijo}-{numero}{sufijo}" if prefijo else f"{numero}{sufijo}"
+
+
+def clave_orden(valor: str | None, con_prefijo: bool = False) -> str | None:
+    """'10.A' -> '10A', '69A' -> '69A', '7' -> '7', 'N/A' -> None.
+
+    Con `con_prefijo` también admite letras delante: 'AC-07' -> 'AC-7'. Es opcional porque en otros
+    proyectos esas letras no son un nº de orden (p. ej. 'EC-3' en ECHO es otro tipo de gasto)."""
     if not valor:
         return None
     v = re.sub(r"[\s.]", "", str(valor)).upper()
-    m = re.fullmatch(r"(\d+)([A-Z]?)", v)
-    return f"{int(m.group(1))}{m.group(2)}" if m else None
+    m = re.fullmatch(r"(?:([A-Z]+)-?)?(\d+)([A-Z]?)" if con_prefijo else r"()(\d+)([A-Z]?)", v)
+    return _clave(m.group(1) or "", int(m.group(2)), m.group(3)) if m else None
 
 
 def ordenes_documento(nombre: str, patron_prefijo: re.Pattern) -> set[str]:
+    """Nº de orden manual que lleva el nombre del archivo. El patrón usa los grupos `desde` (y
+    `hasta`, `sufijo`), o `lista`; si el nº lleva letras delante (AC-07), el grupo `prefijo`."""
     m = patron_prefijo.search(nombre)
     if not m:
         return set()
     grupos = m.groupdict()
     if grupos.get("lista"):
         return {str(int(n)) for n in re.findall(r"\d+", grupos["lista"])}
-    desde = int(m.group("desde"))
-    hasta = int(m.group("hasta") or desde)
-    sufijo = (m.group("sufijo") or "").upper()
+    desde = int(grupos["desde"])
+    hasta = int(grupos.get("hasta") or desde)
+    sufijo = (grupos.get("sufijo") or "").upper()
+    prefijo = (grupos.get("prefijo") or "").upper()
     if hasta < desde or hasta - desde > 50:
         return set()
-    return {f"{n}{sufijo}" for n in range(desde, hasta + 1)}
+    return {_clave(prefijo, n, sufijo) for n in range(desde, hasta + 1)}
 
 
 @dataclass
@@ -44,6 +55,7 @@ class Validacion:
 
 def validar(resultados: list[Resultado], documentos: list[Documento], patron_prefijo: str) -> Validacion:
     pat = re.compile(patron_prefijo)
+    con_prefijo = "prefijo" in pat.groupindex      # el nº de orden lleva letras delante (AC-07)
     docs_por_orden: dict[str, set[str]] = {}
     for d in documentos:
         for o in ordenes_documento(d.nombre, pat):
@@ -51,7 +63,7 @@ def validar(resultados: list[Resultado], documentos: list[Documento], patron_pre
 
     filas, cuenta, por_conf = [], Counter(), {}
     for r in resultados:
-        clave = clave_orden(r.gasto.orden)
+        clave = clave_orden(r.gasto.orden, con_prefijo)
         esperados = docs_por_orden.get(clave, set()) if clave else set()
         asignado = r.mejor.documento.id if r.estado == "asignado" else None
         if not clave:

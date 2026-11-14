@@ -6,6 +6,7 @@
 from __future__ import annotations
 
 import argparse
+import fnmatch
 import sys
 from collections import Counter
 from datetime import datetime
@@ -55,7 +56,15 @@ def _leer_contenido(conc: Conciliador, resultados: list, cfg: dict, raiz: Path):
         return resultados, None
     modelo, tope = c.get("modelo", MODELO), int(c.get("max_documentos", 50))
     lector = Lector(modelo=modelo, max_paginas=int(c.get("max_paginas", MAX_PAGINAS)), raiz=raiz)
-    a_leer = [d for d in conc.documentos_a_leer(resultados) if se_puede_leer(d.ubicacion)]
+    # Archivos que no deben salir del equipo (p. ej. nóminas): se cruzan por nombre, pero no se leen
+    excluidos = [d for d in conc.documentos_a_leer(resultados)
+                 if any(fnmatch.fnmatch(d.nombre, p) for p in c.get("excluir", []))]
+    for d in excluidos:
+        d.lectura = "no leído: excluido de la lectura"
+    a_leer = [d for d in conc.documentos_a_leer(resultados)
+              if se_puede_leer(d.ubicacion) and d not in excluidos]
+    if excluidos:
+        print(f"Contenido: {len(excluidos)} documentos excluidos de la lectura (contenido.excluir).")
     en_cache = sum(lector.en_cache(Path(d.ubicacion)) for d in a_leer)
     nuevos = min(len(a_leer) - en_cache, tope)
     print(f"Contenido: {len(a_leer)} documentos por leer, {en_cache} ya leídos antes (caché). "

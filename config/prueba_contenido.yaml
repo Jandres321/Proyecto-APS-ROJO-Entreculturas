@@ -71,7 +71,7 @@ contenido:
   max_paginas: 5        # páginas que se leen de cada PDF
   max_documentos: 5     # tope de llamadas a la API: como mucho se leen 5 documentos
   candidatos: 3         # documentos candidatos que se leen por cada gasto dudoso
-  bonus_importe: 0.30         # el importe del gasto coincide con el total del documento
+  bonus_importe: 0.40         # el importe del gasto coincide con el total del documento
   tolerancia_importe: 0.01    # diferencia relativa admitida (1 %)
   bonus_factura: 0.35         # dentro del documento se lee el nº de factura del gasto
   penalizacion_factura: 0.15  # dentro del documento se lee otro nº de factura

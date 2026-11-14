@@ -61,6 +61,29 @@ def test_validacion_rangos_y_sufijos():
     assert clave_orden("10.A") == "10A" and clave_orden("N/A") is None
 
 
+def test_validacion_orden_con_letras_delante():
+    """Nº de orden tipo 'AC-07' (La Rioja): el listado lo escribe sin ceros, el archivo con ellos."""
+    import re
+    pat = re.compile(r'^(?P<prefijo>[A-Za-z]+)-(?P<desde>\d+)(?=[\s._]|$)')   # sin grupos hasta/sufijo
+    assert ordenes_documento("AC-07.pdf", pat) == {"AC-7"}
+    assert ordenes_documento("stp-12.pdf", pat) == {"STP-12"}
+    assert ordenes_documento("Factura.pdf", pat) == set()
+    assert clave_orden("AC-7", True) == clave_orden("ac-07", True) == "AC-7"
+    assert clave_orden("PL 12", True) == "PL-12" and clave_orden("N/A", True) is None
+    assert clave_orden("AB", True) is None
+    # Sin la opción, las letras delante no son un nº de orden (p. ej. 'EC-3' en ECHO)
+    assert clave_orden("EC-3") is None and clave_orden("10A") == "10A"
+
+
+def test_validar_con_prefijo_solo_si_el_yaml_lo_pide():
+    patron = r'^(?P<prefijo>[A-Za-z]+)-(?P<desde>\d+)(?=[\s._]|$)'
+    docs = [doc("AC-07.pdf")]
+    g = gasto(1, "Material de oficina", "F-1", date(2024, 5, 10), orden="AC-7")
+    (r,) = conciliador().conciliar([g], docs)
+    assert validar([r], docs, patron).metricas["no_encontrados"] == 1       # AC-7 tiene su documento
+    assert validar([r], docs, PREFIJO).metricas["gastos_evaluables"] == 0   # sin 'prefijo' no cuenta
+
+
 def test_validar_cuenta_aciertos():
     docs = [doc("1. Alquiler sala FP UGA04 108.pdf")]
     g = gasto(1, "Alquiler sala", "FP UGA04 108", date(2024, 10, 24), orden="1")

@@ -22,7 +22,12 @@ class Documento:
     @property
     def firma(self) -> tuple:
         """Dos archivos con la misma firma son copias o versiones del mismo documento
-        (p. ej. el .pdf y el .xlsx de la misma comisión bancaria)."""
+        (p. ej. el .pdf y el .xlsx de la misma comisión bancaria).
+
+        Si el nombre no dice nada (solo el nº de orden: AC-07.pdf), no se puede afirmar que dos
+        archivos sean copias: cada uno es distinto."""
+        if not (self.texto or self.meses or self.refs):
+            return ("nombre sin información", self.id)
         return (self.texto, frozenset(self.meses), frozenset(self.refs))
 
 
@@ -38,6 +43,7 @@ class Gasto:
     importe_eur: float | None
     pago: str = ""
     importe_local: float | None = None      # importe en moneda local (para comparar con el documento)
+    fecha_pago: date | None = None          # fecha de pago, si el listado la tiene (los recibos llevan esta)
     referencia_extra: str = ""   # otras columnas con referencias (p. ej. código contable)
     imputado_donante: float | None = None   # importe imputado al donante (None = no informado)
     imputado_otros: float | None = None     # importe imputado a otros financiadores

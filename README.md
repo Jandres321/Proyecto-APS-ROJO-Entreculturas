@@ -4,7 +4,7 @@ Herramienta de apoyo para **agilizar la justificación económica** de los proye
 
 > **Este README es la fuente de verdad del proyecto.** Está pensado para que cualquier persona, o cualquier IA (Claude, ChatGPT, Gemini, Copilot…), entienda el proyecto completo leyendo solo este archivo. Hay que **actualizarlo en cada cambio** (ver [Mantener este README](#13-mantener-este-readme)).
 
-**Estado (14/11/2026):** fase 0 terminada. Ya funciona un **conciliador gasto ↔ justificante** que por defecto no usa IA. Está probado con 2 proyectos reales de donantes distintos: Uganda (Xunta) y ECHO Colombia. Los documentos pueden estar en una **carpeta local o en Google Drive**; la conexión con Drive está probada con una API simulada y falta probarla con el Drive real de Entreculturas. La **lectura del contenido de los PDF** (fase 1) está programada como opción desactivada por defecto y probada solo con una API simulada: **no se ha ejecutado con documentos reales**, a la espera de que Entreculturas confirme el proveedor de IA.
+**Estado (14/11/2026):** fase 0 terminada. Ya funciona un **conciliador gasto ↔ justificante** que por defecto no usa IA. Está probado con 3 proyectos reales de donantes distintos: Uganda (Xunta), ECHO Colombia y La Rioja (este último, de momento solo por nombre). Los documentos pueden estar en una **carpeta local o en Google Drive**; la conexión con Drive está probada con una API simulada y falta probarla con el Drive real de Entreculturas. La **lectura del contenido de los PDF** (fase 1) es una opción desactivada por defecto. En La Rioja, donde los archivos solo llevan el nº de orden, encuentra 11 de los 19 gastos con documento (precisión 92 %, sin falsos positivos); en una prueba de 5 facturas de Uganda no encontró ninguno porque el importe leído no coincide con el del listado (sección 9).
 
 ---
 
@@ -74,7 +74,7 @@ Casi todos los PDF son **escaneados, sin capa de texto**: para leer su contenido
 | `24-UG-226 Adjumani - Xunta 2024` | Xunta · Uganda | Normativa, presupuesto, informe final con la **relación de facturas (203 gastos)** y **~100 justificantes** numerados | **Piloto** del conciliador |
 | `23-CO-034 - ECHO` | ECHO · Colombia | Listado de ~3.000 gastos, presupuesto (MR), guías de ECHO y **12 PDF de muestra** | **Segundo caso** del conciliador |
 | `22_ET_217 Crisis Tigray Addis - Xunta de Galicia` | Xunta · Etiopía | Facturas antes y después de corregir y **lista de incidencias del revisor con las respuestas de Entreculturas** | Futuro: evaluar la detección de incidencias (proceso 1) |
-| `21-CO-035 Gobierno de la Rioja` | La Rioja · Colombia | Bases reguladoras, presupuesto, informe (listado + resumen por partida) y 19 justificantes | Futuro: proceso 2 |
+| `21-CO-035 Gobierno de la Rioja` | La Rioja · Colombia | Bases reguladoras, presupuesto, informe (listado + resumen por partida) y 19 justificantes **nombrados solo por su nº de orden** (`AC-07`, `D-30`...) | **Tercer caso** del conciliador (nombres sin información). Futuro: proceso 2 |
 | `22-PY-136 - AECID` | AECID · Paraguay | Formulario oficial AECID completo (balance presupuestario, listado de comprobantes…) y ~18 justificantes | Futuro: proceso 2 en formato AECID |
 | `22-22LB-02 - Líbano Convenio AECID 2023` | AECID · Líbano | Listado parcial con el nombre del PDF de cada gasto y ~42 justificantes | Poco útil (el cruce ya viene hecho) |
 
@@ -104,6 +104,7 @@ Nosotros no partimos de su código. Sus reglas (`Rules.xlsx`) servirán para la 
 ├── config/                    # Un YAML por proyecto: describe sus datos
 │   ├── uganda_adjumani.yaml   #   piloto (Xunta, Uganda)
 │   ├── echo_colombia.yaml     #   segundo caso (ECHO, Colombia)
+│   ├── rioja_colombia.yaml    #   tercer caso (La Rioja, Colombia): PDF nombrados solo por su nº de orden
 │   ├── ejemplo_drive.yaml     #   plantilla para un proyecto con documentos en Google Drive
 │   └── prueba_contenido.yaml  #   prueba de la lectura del contenido con pocas facturas (Uganda)
 ├── src/conciliador/           # Código del conciliador
@@ -199,10 +200,10 @@ Habrá archivos mal nombrados, y la mayoría son escaneos (algunos manuscritos).
 
    | Señal | Efecto en la puntuación |
    |---|---|
-   | El importe del gasto coincide con el total del documento (±1 %) | `+0,30` |
+   | El importe del gasto coincide con el total del documento (±1 %) | `+0,40` |
    | Dentro del documento se lee el nº de factura del gasto | `+0,35` |
    | Dentro del documento se lee otro nº de factura | `−0,15` |
-   | La fecha del documento está a ±3 días de la del gasto | `+0,10` |
+   | La fecha del documento está a ±3 días de la del gasto **o de su fecha de pago** (los recibos llevan esta) | `+0,10` |
    | El proveedor del documento se parece al del gasto | `+0,10` |
 
    - El importe se compara en **moneda local** (`listado.columnas.importe_local`); el importe en euros solo se usa si el documento está en euros.
@@ -228,16 +229,16 @@ Todo lo específico de un proyecto está en `config/<proyecto>.yaml`. **Un proye
 | `documentos.carpeta` | (drive) URL o id de la carpeta de Drive |
 | `documentos.recursivo` / `excluir` | Recorrer subcarpetas (por defecto sí) y patrones de archivos a ignorar (normativa, el propio listado…) |
 | `drive.credenciales` / `drive.token` | (drive) JSON de credenciales de Google y dónde guardar el token. Por defecto `.secrets/credentials.json` y `.secrets/token.json` |
-| `listado.archivo` / `hoja` | Excel local con el listado de gastos y su hoja |
+| `listado.archivo` / `hoja` | Excel local con el listado de gastos y su hoja. El nombre admite comodines (`*`, `?`) si el archivo tiene caracteres raros; debe coincidir con uno solo |
 | `listado.drive` | (opcional) URL del listado en Drive (Excel u Hoja de cálculo de Google). Si se indica, tiene prioridad sobre `archivo` y necesita permiso de lectura |
-| `listado.columnas` | Posición de: `partida`, `orden` (solo para validar), `fecha`, `factura`, `proveedor`, `descripcion`, `importe_eur`, `importe_local` (opcional; se compara con el total leído en el documento), `pago` |
+| `listado.columnas` | Posición de: `partida`, `orden` (solo para validar), `fecha`, `factura`, `proveedor`, `descripcion`, `importe_eur`, `importe_local` (opcional; se compara con el total leído en el documento), `fecha_pago` (opcional; los recibos y comprobantes de pago llevan esta fecha y no la de la factura), `pago` |
 | `listado.columnas_referencia` | Columnas extra con referencias (p. ej. el código contable en ECHO) |
 | `listado.imputacion.donante` / `otros` | Columnas con el importe imputado al donante y a otros financiadores |
 | `listado.partidas_indirectos` | Regex de las partidas de costes indirectos |
 | `listado.obligatorias` | Campos que debe tener una fila para contar como gasto |
 | `referencias.patron` | Regex con los grupos `prefijo` y `numero` para reconocer el nº de factura o el código contable |
 | `referencias.numeros_largos` | Tratar números sueltos de 5 o más cifras como referencia |
-| `prefijo_orden` | Regex del nº de orden manual en el nombre del archivo: grupos `desde`/`hasta`/`sufijo` o `lista`. Se oculta al cruzar y se usa al validar |
+| `prefijo_orden` | Regex del nº de orden manual en el nombre del archivo: grupo `desde` (y opcionalmente `hasta`, `sufijo`) o `lista`. Si el nº lleva letras delante (`AC-07`), el grupo `prefijo`: solo entonces la validación entiende esos nº de orden en el listado (`AC-7`). Se oculta al cruzar y se usa al validar |
 | `cruce.*` | Pesos y umbrales (ver sección 5). `conceptos_mes_vencido`: conceptos que se pagan el mes siguiente |
 | `sinonimos` | Palabras equivalentes del dominio (`salario: [nomina, payroll]`) |
 | `contenido.activado` | Leer el contenido de los documentos dudosos. Por defecto `false`; también se activa con `--contenido` |
@@ -245,9 +246,10 @@ Todo lo específico de un proyecto está en `config/<proyecto>.yaml`. **Un proye
 | `contenido.max_paginas` | Páginas que se leen de cada PDF (por defecto 3) |
 | `contenido.max_documentos` | Tope de llamadas a la API por ejecución (por defecto 50). Los documentos ya leídos salen de la caché y no cuentan |
 | `contenido.candidatos` | Documentos candidatos que se leen por cada gasto dudoso (por defecto 3) |
+| `contenido.excluir` | Patrones de archivos que **no se envían a la API** aunque haya que leerlos (p. ej. `["PL-*"]` para nóminas). Se cruzan por nombre como siempre y el Excel los marca como «no leído: excluido» |
 | `contenido.bonus_*`, `penalizacion_factura`, `tolerancia_importe`, `dias_fecha`, `similitud_proveedor` | Pesos y tolerancias de las señales del contenido (ver sección 5) |
 
-Ejemplos completos: `config/uganda_adjumani.yaml` (nº de factura `EB UGA04 602`) y `config/echo_colombia.yaml` (código contable `206-15000`).
+Ejemplos completos: `config/uganda_adjumani.yaml` (nº de factura `EB UGA04 602`), `config/echo_colombia.yaml` (código contable `206-15000`) y `config/rioja_colombia.yaml` (archivos que solo llevan el nº de orden `AC-07`).
 
 ## 7. Instalación y uso
 
@@ -315,6 +317,23 @@ De momento solo funciona con documentos en una **carpeta local**. Con Drive se a
 6. Repite la ejecución: no debe volver a llamar a la API (los documentos ya leídos están en `output/cache_lectura/`). Para empezar de cero, borra esa carpeta.
 
 Como el listado es el de todo el proyecto (203 gastos) y la carpeta solo tiene unas pocas facturas, casi todos los gastos saldrán sin justificante: es lo esperado, lo que importa es la lectura de esos documentos.
+
+#### Prueba con La Rioja (nombres sin información)
+
+`config/rioja_colombia.yaml` cruza los 19 PDF de La Rioja, que se llaman solo por su nº de orden, así que **la única forma de encontrar su gasto es el contenido**. El cruce por nombre es gratis y ya se puede ejecutar:
+
+```cmd
+python -m conciliador config/rioja_colombia.yaml --validar
+```
+
+Esperado: 0 asignados por nombre y `no encontrados: 19` (la validación reconoce que cada PDF tiene su gasto). Para leer el contenido hace falta la aprobación de Entreculturas:
+
+```cmd
+python -m conciliador config/rioja_colombia.yaml --contenido --validar
+```
+
+- Los 4 `PL-*` son **desprendibles de nómina**: el YAML los excluye de la lectura (`contenido.excluir`), así que se envían como mucho 15 documentos.
+- Con los pesos actuales, un gasto solo se asigna por contenido si coinciden **importe y nº de factura** (0,75) o importe, fecha y proveedor (0,60, justo el umbral). Las nóminas no llevan nº de factura y están excluidas, así que no se encuentran. El resultado de la primera ejecución real está en la sección 9.
 
 ### Google Drive
 
@@ -411,8 +430,34 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 - Encuentra **16 de los 17** gastos que tienen documento en la muestra y **no asigna ninguno a un documento equivocado**.
 - Hay 16 asignaciones que la validación cuenta como fallos. Son gastos que comparten comprobante de egreso con el documento. Se revisó a mano el comprobante 15935 y **el PDF contiene de verdad todos esos gastos**: son aciertos que la numeración manual no recogía.
 
+### La Rioja (Colombia)
+374 gastos y 19 PDF nombrados únicamente por su nº de orden (`AC-07`, `D-30`, `PL-02`, `STP-01`...).
+
+- Por nombre se asignan **0 de 19, como era de esperar**: el nombre no dice nada del concepto. La validación reconoce los 19 (`no encontrados: 19`); la «exactitud» del 94,9 % no significa nada aquí, es el resto de gastos sin documento.
+- De esos 19 gastos, 15 llevan nº de factura en el listado (todos menos las 4 nóminas) y 14 comparten importe (±1 %) con otro gasto, por lo que el importe solo no basta para identificarlos.
+
+**Con la lectura del contenido** (15 documentos leídos con `claude-sonnet-5-5`; las 4 nóminas `PL-*` excluidas de la lectura):
+
+| Métrica | Resultado |
+|---|---|
+| Gastos asignados | 12 (11 correctos, 1 incorrecto) |
+| Falsos positivos (gastos sin documento a los que se asigna uno) | 0 |
+| Acierto con confianza alta / media / baja | 8/8 · 2/2 · 1/2 |
+| Precisión / cobertura (sobre los 19) | 92 % / 58 % (73 % de los 15 documentos leídos) |
+
+- El **importe leído coincide exactamente** con el del listado en los 15 documentos: aquí es la señal más fiable.
+- El incorrecto es un **duplicado real del listado**: dos gastos con el mismo importe y el mismo nº de factura. Sale con confianza baja, para que una persona lo revise.
+- **3 de los 15 no se asignan**, aunque en los tres el mejor candidato era el documento correcto: importe y fecha de pago coinciden, pero el proveedor no se parece o el PDF no lleva nº de factura (0,50); y uno lleva un nº de factura distinto, que penaliza (0,35). Los 4 `PL-*` no se pueden encontrar: son nóminas, sin nº de factura y excluidas.
+- **Simulación con la caché (sin API)** de bajar el umbral: a 0,50 se asignan 2 más correctos, pero con 1 falso positivo; a 0,45 o menos aparecen 10 o más falsos positivos. No se ha tocado: son solo 15 documentos de un proyecto.
+- Esta prueba sacó tres ajustes: la fecha de pago como segunda fecha (en 8 de los 15 documentos es la que coincide), el peso del importe de 0,30 a 0,40 (+2 correctos y 0 falsos positivos en la simulación) y que los documentos sin información en el nombre no se tomen por copias (antes un empate exacto no salía como ambiguo).
+
 ### Lectura del contenido
-**Sin medir todavía.** No se ha ejecutado con documentos reales (falta la aprobación del proveedor). Con la lectura desactivada, las cifras de arriba no cambian: se ha comprobado volviendo a ejecutar `--validar` en los dos proyectos.
+**Primera prueba real:** 5 facturas de Uganda con los nombres cambiados (`a.pdf`... `e.pdf`) para que el nombre no ayudara. Con la lectura desactivada las cifras de arriba no cambian (comprobado con `--validar` en los tres proyectos).
+
+- Las 5 se leen como legibles (3 manuscritas) y la caché funciona: repetir la ejecución no llama a la API.
+- **0 de 5 se asignan a su gasto.** El nº de factura leído coincide exactamente en 2; en otra solo cambia el prefijo de letras; en otra la API no lee ningún número; y la última lleva el nº del propio proveedor, que el listado no recoge.
+- El **importe** leído es entre 2,5 y 48 veces el importe en moneda local del gasto correcto, en los 5 casos. No es la moneda ni una suma de varios gastos. Pendiente de comprobar si la API lee otro número del PDF o si el listado no recoge el total del documento.
+- Con los pesos actuales hace falta nº de factura **e** importe (0,75 frente a un umbral de 0,60), así que ninguno llega.
 
 ## 10. Decisiones de diseño
 
@@ -431,18 +476,26 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 - **Un importe distinto no penaliza.** Un mismo documento puede cubrir varios gastos (comprobantes de egreso de ECHO), así que su total no tiene por qué ser el del gasto.
 - **Si el nombre y el contenido no apuntan al mismo documento, no se elige a ciegas:** el gasto sale con confianza baja y el motivo lo explica.
 - **La clave de la API vive en `.env`** y la recoge directamente el cliente oficial: el código no la lee, no la imprime y no la guarda.
+- **Se pueden dejar archivos fuera de la lectura** (`contenido.excluir`) sin quitarlos del cruce: sirve para nóminas y otros documentos con datos personales.
+- **La fecha de pago cuenta como segunda fecha.** Un recibo o un comprobante de pago lleva la fecha en que se pagó, no la de la factura: basta que coincida con una de las dos.
+- **Dos archivos sin información en el nombre no son copias.** Si el nombre solo lleva el nº de orden (`AC-07.pdf`), todos los documentos tienen el mismo texto; tratarlos como copias impedía detectar empates y los marcaba como «copia de» en el Excel.
+- **Un nº de orden con letras (`AC-07`) solo cuenta si el YAML lo pide** (grupo `prefijo` en `prefijo_orden`). En ECHO, `EC-3` no es un nº de orden, sino otro tipo de gasto, y tratarlo como tal cambiaba las métricas.
 
 ## 11. Limitaciones conocidas
 
 - Depende de que los nombres de archivo sean informativos. Con nombres genéricos ("Combustible Septiembre"), el cruce es débil.
-- La lectura del contenido **no se ha probado con documentos reales**: solo con una API simulada. No se sabe aún cuánto mejora el cruce, cuánto cuesta ni cómo de bien lee los manuscritos.
+- La lectura del contenido se ha probado con **La Rioja** (19 documentos, 11 encontrados) y con **5 facturas de Uganda** (ninguno encontrado, por el importe); sección 9. No se sabe aún cuánto cuesta ni cómo se comporta en otros proyectos (Tigray, Paraguay).
+- Los pesos de las señales del contenido se han ajustado con solo 15 documentos de La Rioja.
+- Si el nº de factura leído solo difiere del del gasto en las letras del prefijo, hoy se penaliza como «otra factura» y se avisa de un conflicto que no existe (el cruce por nombre lo trata como probable errata). Pendiente de igualar.
+- Sin nº de factura en el listado (nóminas, anticipos), hace falta que coincidan importe, fecha y proveedor para llegar justo al umbral (0,60). Si falla uno, p. ej. el proveedor, que en los recibos suele ser otro (un banco, un tercero), queda en 0,50 y no se asigna.
 - Los pesos de las señales del contenido son un punto de partida **sin calibrar**.
 - La lectura solo funciona con documentos en una carpeta local, no con Drive (haría falta permiso de lectura y descargar los archivos).
 - Solo se leen PDF e imágenes, y solo las primeras páginas: en un PDF con varios justificantes se extrae el principal.
+- **Un gasto = un documento.** Si un gasto necesita varios (factura y justificante de pago, o varias facturas que suman su importe), solo se asigna el mejor; el otro sale como «2º candidato» y a veces marca el gasto como ambiguo. Con la numeración manual, en Uganda 13 de 181 gastos tienen 2 documentos distintos (en la muestra de ECHO, ninguno). La validación da el gasto por bueno si acierta cualquiera de ellos, así que no lo refleja. Tampoco se suman los importes de varios documentos ni se usa el `tipo` que lee la API. Al revés (un documento que cubre varios gastos) sí está resuelto.
 - En proyectos con muchos gastos del mismo importe (nóminas mensuales), la coincidencia de importe puede dar falsos positivos.
 - Sin `importe_local` en el YAML, el importe solo se compara si el documento está en euros.
 - Un rechazo del modelo se trata como «no leído»; no se reintenta con otro modelo.
-- Los pesos se ajustaron con Uganda y solo se han probado 2 proyectos.
+- Los pesos se ajustaron con Uganda y solo se han probado 3 proyectos (La Rioja, solo por nombre).
 - Las series mensuales con criterio de nombrado irregular (cotizaciones de diciembre en Uganda) quedan como ambiguas.
 - La conexión con Google Drive está probada con una API simulada y con los nombres reales de Uganda, pero **aún no contra el Drive de Entreculturas**.
 
@@ -451,7 +504,7 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 | Fase | Descripción | Estado |
 |---|---|---|
 | 0 | Conciliador gasto ↔ justificante por nombre de archivo | ✅ Hecho (Uganda + ECHO) |
-| 1 | Leer el contenido de los documentos dudosos (LLM con visión) y usar importe, fecha, proveedor y nº de factura en el cruce | 🟡 Programado y probado con API simulada; **falta ejecutarlo con documentos reales**, medirlo y calibrar los pesos |
+| 1 | Leer el contenido de los documentos dudosos (LLM con visión) y usar importe, fecha, proveedor y nº de factura en el cruce | 🟡 Probado: en La Rioja (nombres sin información) encuentra 11 de 19 con 92 % de precisión; en 5 facturas de Uganda no encuentra ninguna por el importe. Falta resolver Uganda, probar Tigray y Paraguay y calibrar los pesos |
 | 1b | Leer también documentos de Drive (descarga con permiso de lectura) y verificar los gastos ya asignados con confianza alta o media | Pendiente |
 | 2 | Revisar justificantes con las reglas del donante (`Rules.xlsx`) y evaluar con las incidencias reales de Tigray | Pendiente |
 | 3 | Proceso 2: presupuesto aprobado frente a ejecutado por partida y topes del donante (Rioja, AECID, Uganda) | Pendiente |
@@ -493,3 +546,6 @@ Este archivo es el **contexto compartido** del equipo y de las IAs que usemos. R
 | 14/11/2026 | Limpieza: un único formato de importes (`texto.formato_importe`) y una única firma de documento (`Documento.firma`); `lectura.py` queda solo con la API y el resumen para el Excel pasa a `salida.py`; `requirements.txt` remite a `pyproject.toml`; `AGENTS.md` recoge las reglas de la clave y de la lectura del contenido. Sin cambios en el cruce ni en las métricas |
 | 14/11/2026 | El Excel de salida lleva siempre la fecha y la hora en el nombre (`output/<yaml>_<AAAAMMDD>_<HHMMSS>.xlsx`): cada ejecución genera un archivo distinto. `--salida` sigue usando la ruta exacta |
 | 14/11/2026 | Preparada la primera prueba real de la lectura del contenido: `config/prueba_contenido.yaml` (carpeta pequeña `TUM_SociAI/prueba_contenido/`, tope de 5 llamadas) y guía en la sección 7. Los errores de la API ahora muestran su mensaje en «Leído por contenido» |
+| 14/11/2026 | Documentada la limitación «un gasto = un documento» (sección 11), con el recuento en Uganda y ECHO. Sin cambios de código |
+| 14/11/2026 | **La Rioja** como tercer caso: `config/rioja_colombia.yaml` (PDF nombrados solo por su nº de orden; listado = hoja `CUAD 3`). La validación entiende nº de orden con letras (`AC-07`) si el YAML define el grupo `prefijo`; `listado.archivo` admite comodines; `contenido.excluir` deja archivos (nóminas) fuera de la lectura con la API. Por nombre: 0 de 19 asignados, como se esperaba. Métricas de Uganda y ECHO sin cambios. Resultado de la primera prueba real de lectura (5 facturas de Uganda) anotado en la sección 9 |
+| 14/11/2026 | **Primera ejecución real en La Rioja** con lectura del contenido: 12 asignados (11 correctos, 1 incorrecto marcado como baja), 0 falsos positivos, alta 8/8. Ajustes derivados: fecha de pago como segunda fecha (`listado.columnas.fecha_pago`), peso del importe de 0,30 a 0,40, y los documentos sin información en el nombre ya no se toman por copias (se detectan empates). Métricas de Uganda y ECHO por nombre sin cambios |

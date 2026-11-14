@@ -51,8 +51,8 @@ def test_cada_dato_del_contenido_suma_y_se_explica():
     g = gasto("Material de oficina")
     base = puntuar(g, doc("Material oficina.pdf")).puntuacion
     casos = [
-        ({"importe_total": 1500.0}, 0.30, "importe total (1.500,00 UGX) coincide"),
-        ({"importe_total": 1510.0}, 0.30, "coincide"),                    # dentro del 1 %
+        ({"importe_total": 1500.0}, 0.40, "importe total (1.500,00 UGX) coincide"),
+        ({"importe_total": 1510.0}, 0.40, "coincide"),                    # dentro del 1 %
         ({"num_factura": "F 0042"}, 0.35, "nº de factura del gasto"),
         ({"fecha": "2024-05-12"}, 0.10, "(±2 días)"),
         ({"proveedor": "PAPELERIA INVENTADA S.L."}, 0.10, "es el del gasto"),
@@ -160,6 +160,56 @@ def test_solo_se_leen_documentos_de_gastos_dudosos_y_documentos_sin_gasto():
     assert c.revisar_con_contenido(res)[0] is res[0]
 
 
+def test_la_fecha_de_pago_tambien_vale():
+    """Un recibo lleva la fecha de pago, no la de la factura: coincide con cualquiera de las dos."""
+    g = gasto("Material de oficina", fecha=date(2024, 1, 1))
+    g.fecha_pago = date(2024, 5, 9)
+    base = puntuar(g, doc("Material oficina.pdf")).puntuacion
+    c = puntuar(g, doc("Material oficina.pdf", fecha="2024-05-10"))
+    assert round(c.puntuacion - base, 4) == 0.10
+    assert any("coincide con la de pago del gasto (±1 días)" in m for m in c.motivos)
+    # Sin fecha de pago en el listado, esa misma fecha no coincide con la del gasto
+    g2 = gasto("Material de oficina", fecha=date(2024, 1, 1))
+    c2 = puntuar(g2, doc("Material oficina.pdf", fecha="2024-05-10"))
+    assert c2.puntuacion == base and any(m.endswith("no coincide con la del gasto.") for m in c2.motivos)
+    assert any(m.endswith("ni con la de pago.") for m in puntuar(g, doc("Material oficina.pdf", fecha="2023-01-01")).motivos)
+
+
+PREFIJO_ORDEN = r'^(?P<prefijo>[A-Za-z]+)-(?P<desde>\d+)(?=[\s._]|$)'     # archivos que solo llevan el nº de orden
+
+
+def test_documentos_sin_informacion_en_el_nombre_no_se_toman_por_copias():
+    """Con nombres como AC-01.pdf todos los documentos tienen el mismo texto (vacío): no son copias
+    unos de otros, y si dos encajan igual con un gasto, el gasto debe salir como ambiguo."""
+    c = Conciliador({}, REFS, PREFIJO_ORDEN, cfg_contenido={})
+    a, b = doc("AC-01.pdf"), doc("STP-02.pdf")
+    (r,) = c.conciliar([gasto("Material de oficina")], [a, b])
+    assert r.estado == "sin_justificante" and a.firma != b.firma
+    datos = doc("x", importe_total=1500.0, num_factura="F-0042").contenido
+    a.contenido, b.contenido = dict(datos), dict(datos)       # mismo importe y misma factura en los dos
+    (r2,) = c.revisar_con_contenido([r])
+    assert r2.estado == "asignado" and r2.ambiguo and r2.confianza == "baja" and r2.segundo is not None
+
+
+def test_documentos_con_el_mismo_nombre_si_se_toman_por_copias():
+    a, b = doc("Material oficina.pdf"), doc("Material oficina.xlsx")
+    c = conciliador()
+    c.conciliar([], [a, b])
+    assert a.firma == b.firma
+
+
+def test_excel_no_llama_copia_a_documentos_sin_informacion_en_el_nombre(tmp_path):
+    c = Conciliador({}, REFS, PREFIJO_ORDEN, cfg_contenido={})
+    a, b = doc("AC-01.pdf"), doc("STP-02.pdf")
+    res = c.conciliar([gasto("Material de oficina")], [a, b])
+    a.contenido = doc("x", importe_total=1500.0, num_factura="F-0042").contenido
+    res = c.revisar_con_contenido(res)
+    ruta = escribir_excel(tmp_path / "s.xlsx", "Prueba", res, [a, b])
+    docs = pd.read_excel(ruta, sheet_name="Documentos").set_index("Documento")
+    assert docs.loc["STP-02.pdf", "Gastos asignados"] == 0
+    assert not str(docs.loc["STP-02.pdf", "Observación"]).startswith("Copia")
+
+
 def test_excel_con_columnas_de_contenido(tmp_path):
     c = conciliador()
     escaneo = doc("Escaneo 0007.pdf")
@@ -221,6 +271,22 @@ def test_cli_salida_explicita_se_respeta(tmp_path, monkeypatch):
     destino = tmp_path / "mi_informe.xlsx"
     assert main([str(tmp_path / "prueba.yaml"), "--raiz", str(tmp_path), "--salida", str(destino)]) == 0
     assert destino.is_file() and not (tmp_path / "output").exists()
+
+
+def test_cli_contenido_excluir_no_envia_esos_archivos(tmp_path, monkeypatch, capsys):
+    """Los archivos de `contenido.excluir` (p. ej. nóminas) se cruzan por nombre pero no salen a la API."""
+    llamadas = _proyecto(tmp_path, monkeypatch)
+    ruta = tmp_path / "prueba.yaml"
+    cfg = yaml.safe_load(ruta.read_text(encoding="utf-8"))
+    cfg["contenido"] = {"excluir": ["Combustible*"]}
+    ruta.write_text(yaml.safe_dump(cfg), encoding="utf-8")
+    assert main([str(ruta), "--raiz", str(tmp_path), "--contenido"]) == 0
+    assert len(llamadas) == 1
+    assert "1 documentos excluidos de la lectura" in capsys.readouterr().out
+    (excel,) = (tmp_path / "output").glob("prueba_*.xlsx")
+    docs = pd.read_excel(excel, sheet_name="Documentos").set_index("Documento")
+    assert docs.loc["Combustible.jpg", "Leído por contenido"] == "no leído: excluido de la lectura"
+    assert docs.loc["Escaneo 0007.jpg", "Leído por contenido"] == "sí"
 
 
 def test_cli_con_contenido_lee_guarda_cache_y_respeta_el_tope(tmp_path, monkeypatch, capsys):

@@ -38,7 +38,7 @@ DEFECTOS = {
 
 # Señales del contenido leído (sección `contenido:` del YAML). Sin calibrar con datos reales.
 DEFECTOS_CONTENIDO = {
-    "bonus_importe": 0.30,             # el importe del gasto coincide con el total del documento
+    "bonus_importe": 0.40,             # el importe del gasto coincide con el total del documento
     "tolerancia_importe": 0.01,        # diferencia relativa admitida (1 %)
     "bonus_factura": 0.35,             # el nº de factura del gasto es el que se lee en el documento
     "penalizacion_factura": 0.15,      # en el documento se lee otro nº de factura
@@ -258,17 +258,20 @@ class Conciliador:
                 motivos.append(f"Dentro del documento se lee otro nº de factura ({c['num_factura']}).")
 
         # Fecha
+        # Un recibo o un comprobante de pago lleva la fecha de pago, no la de la factura: vale cualquiera
         fecha_doc = _fecha_iso(c.get("fecha"))
-        if fecha_doc and g.fecha:
+        fechas = [(f, nombre) for f, nombre in ((g.fecha, "la del gasto"), (g.fecha_pago, "la de pago del gasto")) if f]
+        if fecha_doc and fechas:
             comparables += 1
-            dias = abs((fecha_doc - g.fecha).days)
+            dias, cual = min((abs((fecha_doc - f).days), nombre) for f, nombre in fechas)
             if dias <= pc["dias_fecha"]:
                 puntos += pc["bonus_fecha"]
                 coinciden += 1
-                motivos.append(f"La fecha del documento ({fecha_doc:%d/%m/%Y}) coincide con la del gasto"
+                motivos.append(f"La fecha del documento ({fecha_doc:%d/%m/%Y}) coincide con {cual}"
                                + ("." if dias == 0 else f" (±{dias} días)."))
             else:
-                motivos.append(f"La fecha del documento ({fecha_doc:%d/%m/%Y}) no coincide con la del gasto.")
+                motivos.append(f"La fecha del documento ({fecha_doc:%d/%m/%Y}) no coincide con la del gasto"
+                               + (" ni con la de pago." if g.fecha_pago else "."))
 
         # Proveedor
         prov_gasto, prov_doc = normalizar(g.proveedor), normalizar(c.get("proveedor") or "")

@@ -61,9 +61,21 @@ def _suma(valores) -> float | None:
     return sum(nums) if nums else None
 
 
+def _resolver_archivo(raiz: Path, archivo: str) -> Path:
+    """Ruta del listado. Admite comodines (*, ?) para nombres con caracteres raros, p. ej.
+    tildes mal codificadas al descomprimir; debe coincidir con un único archivo."""
+    if not any(c in archivo for c in "*?["):
+        return raiz / archivo
+    coincidencias = sorted(p for p in raiz.glob(archivo) if p.is_file())
+    if len(coincidencias) != 1:
+        raise ValueError(f"listado.archivo ({archivo!r}) debe coincidir con un único archivo y coincide "
+                         f"con {len(coincidencias)}.")
+    return coincidencias[0]
+
+
 def leer_listado(cfg: dict, raiz: Path, ruta: Path | None = None) -> list[Gasto]:
     """Lee el listado. `ruta` permite pasar un archivo ya descargado (p. ej. de Drive)."""
-    ruta = ruta or raiz / cfg["archivo"]
+    ruta = ruta or _resolver_archivo(raiz, cfg["archivo"])
     df = pd.read_excel(ruta, sheet_name=cfg["hoja"], header=None, dtype=object)
     col = cfg["columnas"]
     obligatorias = cfg.get("obligatorias", ["fecha", "factura"])
@@ -94,6 +106,7 @@ def leer_listado(cfg: dict, raiz: Path, ruta: Path | None = None) -> list[Gasto]
             importe_eur=_a_numero(celda(fila, "importe_eur")),
             pago=_a_texto(celda(fila, "pago")),
             importe_local=_a_importe(celda(fila, "importe_local")),
+            fecha_pago=_a_fecha(celda(fila, "fecha_pago")),
             referencia_extra=extra,
             imputado_donante=imp_donante,
             imputado_otros=imp_otros,
