@@ -9,6 +9,7 @@ import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
+from .lectura import resumen_contenido
 from .modelos import Documento, Resultado
 from .validacion import Validacion
 
@@ -27,8 +28,23 @@ COLORES = {
 }
 
 
+LEIDO = {"leido": "sí", "ilegible": "ilegible"}
+
+
+def _leido(d: Documento | None) -> str:
+    """'sí' | 'ilegible' | 'no' (con el motivo, si se intentó y falló)."""
+    if d is None or not d.lectura:
+        return "no"
+    return LEIDO.get(d.lectura, d.lectura)
+
+
 def _explicacion(r: Resultado) -> str:
-    """Texto para el revisor: conclusión primero y luego los motivos."""
+    """Texto para el revisor: conclusión, motivos y avisos de la lectura del contenido."""
+    return " ".join(t for t in (_explicacion_base(r), r.aviso, r.cambio) if t)
+
+
+def _explicacion_base(r: Resultado) -> str:
+    """Conclusión primero y luego los motivos."""
     m, s = r.mejor, r.segundo
     if m is None:
         return "No hay documentos en la carpeta."
@@ -54,7 +70,7 @@ def _explicacion(r: Resultado) -> str:
     return texto
 
 
-def _tablas(resultados: list[Resultado], documentos: list[Documento]):
+def _tablas(resultados: list[Resultado], documentos: list[Documento], con_contenido: bool = False):
     filas = []
     for r in resultados:
         g, m, s = r.gasto, r.mejor, r.segundo
@@ -74,6 +90,8 @@ def _tablas(resultados: list[Resultado], documentos: list[Documento]):
             "Documento": m.documento.nombre if asignado else "",
             "Puntuación": m.puntuacion if m else None,
             "Motivo": _explicacion(r),
+            **({"Leído por contenido": _leido(m.documento if m else None),
+                "Datos del contenido": resumen_contenido(m.documento) if m else ""} if con_contenido else {}),
             "Mejor candidato (si no asignado)": m.documento.nombre if (m and not asignado) else "",
             "2º candidato": s.documento.nombre if s else "",
             "Puntuación 2º": s.puntuacion if s else None,
@@ -85,7 +103,9 @@ def _tablas(resultados: list[Resultado], documentos: list[Documento]):
     por_doc = asignados.groupby("Documento").agg(
         **{"Gastos asignados": ("Fila listado", "count"), "Importe asignado €": ("Importe €", "sum")}
     )
-    docs = pd.DataFrame([{"Documento": d.nombre, "Ruta": d.id, "_ubicacion": d.ubicacion} for d in documentos])
+    docs = pd.DataFrame([{"Documento": d.nombre, "Ruta": d.id, "_ubicacion": d.ubicacion,
+                          "Leído por contenido": _leido(d), "Datos del contenido": resumen_contenido(d)}
+                         for d in documentos])
     docs = docs.merge(por_doc, left_on="Documento", right_index=True, how="left")
     docs["Gastos asignados"] = docs["Gastos asignados"].fillna(0).astype(int)
     docs["Importe asignado €"] = docs["Importe asignado €"].fillna(0.0)
@@ -141,8 +161,10 @@ def _formatear(ws, df: pd.DataFrame, col_color: str | None = None, col_link: str
 
 
 def escribir_excel(ruta: Path, proyecto: str, resultados: list[Resultado], documentos: list[Documento],
-                   validacion: Validacion | None = None) -> Path:
-    gastos, docs = _tablas(resultados, documentos)
+                   validacion: Validacion | None = None, lectura: dict | None = None) -> Path:
+    """`lectura` es el resumen de la lectura del contenido (None si no se ha activado)."""
+    gastos, docs = _tablas(resultados, documentos, lectura is not None)
+    cols_contenido = ["Leído por contenido", "Datos del contenido"] if lectura is not None else []
     con = gastos["Estado"] == "Con justificante"
     revisar = gastos["Estado"] == ESTADOS["revisar"]
     cofin = gastos["Estado"] == ESTADOS["cofinanciacion"]
@@ -166,6 +188,15 @@ def escribir_excel(ruta: Path, proyecto: str, resultados: list[Resultado], docum
         ("Documentos sin ningún gasto (revisar)", int(sin_doc.sum())),
         ("Documentos que son copia/otra versión de otro", int(copias.sum())),
     ], columns=["Indicador", "Valor"])
+    if lectura is not None:
+        resumen = pd.concat([resumen, pd.DataFrame([
+            ("— Lectura del contenido —", ""),
+            ("Documentos leídos", lectura["leidos"]),
+            ("   · de ellos, ilegibles", lectura["ilegibles"]),
+            ("Documentos no leídos por error", lectura["errores"]),
+            ("Documentos sin leer por el tope de llamadas", lectura["sin_leer_por_tope"]),
+            ("Gastos cuyo resultado cambia al leer el contenido", lectura.get("cambiados", 0)),
+        ], columns=["Indicador", "Valor"])])
     if validacion:
         m = validacion.metricas
         resumen = pd.concat([resumen, pd.DataFrame([
@@ -188,8 +219,10 @@ def escribir_excel(ruta: Path, proyecto: str, resultados: list[Resultado], docum
         ("Gastos", gastos[visibles], ["Confianza", "Estado"], "Documento", gastos["_ubicacion"]),
         ("Sin justificante", gastos.loc[revisar, visibles], None, None, None),
         ("Cofinanciación e indirectos", gastos.loc[cofin | indir, visibles], "Estado", None, None),
-        ("Documentos", docs[["Documento", "Gastos asignados", "Importe asignado €", "Observación", "Ruta"]], None, "Documento", docs["_ubicacion"]),
-        ("Documentos sin gasto", docs.loc[sin_doc, ["Documento", "Ruta"]], None, "Documento", docs.loc[sin_doc, "_ubicacion"]),
+        ("Documentos", docs[["Documento", "Gastos asignados", "Importe asignado €", "Observación",
+                             *cols_contenido, "Ruta"]], None, "Documento", docs["_ubicacion"]),
+        ("Documentos sin gasto", docs.loc[sin_doc, ["Documento", *cols_contenido, "Ruta"]], None, "Documento",
+         docs.loc[sin_doc, "_ubicacion"]),
     ]
     if validacion:
         val = pd.DataFrame(validacion.por_gasto).merge(

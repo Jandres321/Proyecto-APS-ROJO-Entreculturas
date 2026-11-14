@@ -4,7 +4,7 @@ Herramienta de apoyo para **agilizar la justificación económica** de los proye
 
 > **Este README es la fuente de verdad del proyecto.** Está pensado para que cualquier persona, o cualquier IA (Claude, ChatGPT, Gemini, Copilot…), entienda el proyecto completo leyendo solo este archivo. Hay que **actualizarlo en cada cambio** (ver [Mantener este README](#13-mantener-este-readme)).
 
-**Estado (14/11/2026):** fase 0 terminada. Ya funciona un **conciliador gasto ↔ justificante** que no usa IA. Está probado con 2 proyectos reales de donantes distintos: Uganda (Xunta) y ECHO Colombia. Los documentos pueden estar en una **carpeta local o en Google Drive**; la conexión con Drive está probada con una API simulada y falta probarla con el Drive real de Entreculturas. La siguiente fase es leer el contenido de los PDF.
+**Estado (14/11/2026):** fase 0 terminada. Ya funciona un **conciliador gasto ↔ justificante** que por defecto no usa IA. Está probado con 2 proyectos reales de donantes distintos: Uganda (Xunta) y ECHO Colombia. Los documentos pueden estar en una **carpeta local o en Google Drive**; la conexión con Drive está probada con una API simulada y falta probarla con el Drive real de Entreculturas. La **lectura del contenido de los PDF** (fase 1) está programada como opción desactivada por defecto y probada solo con una API simulada: **no se ha ejecutado con documentos reales**, a la espera de que Entreculturas confirme el proveedor de IA.
 
 ---
 
@@ -113,11 +113,13 @@ Nosotros no partimos de su código. Sus reglas (`Rules.xlsx`) servirán para la 
 │   ├── drive.py               #   Google Drive: autenticación, listado recursivo, descarga del listado
 │   ├── texto.py               #   Normalización: acentos, plurales, sinónimos, referencias, meses
 │   ├── cruce.py               #   Motor de cruce: puntúa cada par gasto-documento y decide
+│   ├── lectura.py             #   (opcional) Lee el contenido de un documento con la API de Claude, con caché
 │   ├── validacion.py          #   Métricas comparando con la numeración manual
 │   └── salida.py              #   Genera el Excel para el revisor
-├── tests/                     # pytest (sin datos reales; Drive con API simulada)
+├── tests/                     # pytest (sin datos reales; Drive y la API de Claude simuladas)
 ├── .secrets/                  # Credenciales y tokens de Google (NO se versiona)
-├── output/                    # Excels generados (NO se versiona: contienen datos personales)
+├── .env.example               # Plantilla de .env (clave de la API de Anthropic). El .env NO se versiona
+├── output/                    # Excels generados y caché de lecturas (NO se versiona: datos personales)
 ├── TUM_SociAI/                # Datos de Entreculturas (NO se versiona)
 ├── pyproject.toml / requirements.txt
 └── Reto Entreculturas-1.pdf   # Enunciado oficial
@@ -127,7 +129,7 @@ Ignorados por git: `TUM_SociAI/`, `output/`, `.secrets/`, `credentials*.json`, `
 
 ## 5. Cómo funciona el conciliador
 
-**Objetivo:** asociar cada línea del listado de gastos con el documento que la justifica, y señalar los gastos sin documento y los documentos que sobran. **Solo usa los nombres de los archivos**: no abre los PDF ni usa IA. Es barato, rápido y respeta la privacidad.
+**Objetivo:** asociar cada línea del listado de gastos con el documento que la justifica, y señalar los gastos sin documento y los documentos que sobran. **Por defecto solo usa los nombres de los archivos**: no abre los PDF ni usa IA. Es barato, rápido y respeta la privacidad. De forma opcional puede [leer el contenido](#lectura-del-contenido-opcional) de los documentos dudosos.
 
 ```
  config/<proyecto>.yaml
@@ -136,7 +138,10 @@ Ignorados por git: `TUM_SociAI/`, `output/`, `.secrets/`, `credentials*.json`, `
  listado.py ──► Gastos ─┐            (listado local o descargado de Drive)
                         ├─► cruce.py ──► Resultados ──► salida.py ──► output/<proyecto>.xlsx
  fuentes.py ──► Docs  ──┘   (texto.py)        │
- (carpeta local o Drive)                      └──► validacion.py (opcional, --validar)
+ (carpeta local o Drive)       ▲              └──► validacion.py (opcional, --validar)
+                               │
+                 lectura.py (opcional, --contenido): lee los documentos dudosos
+                 y cruce.py vuelve a decidir solo esos gastos
 ```
 
 ### Paso a paso
@@ -170,6 +175,43 @@ Ignorados por git: `TUM_SociAI/`, `output/`, `.secrets/`, `credentials*.json`, `
 
 Los pesos y umbrales tienen valores por defecto en `cruce.py → DEFECTOS` y se pueden cambiar en el YAML de cada proyecto.
 
+### Lectura del contenido (opcional)
+
+Habrá archivos mal nombrados, y la mayoría son escaneos (algunos manuscritos). Con `--contenido` (o `contenido.activado: true`), después del cruce por nombre se **leen algunos documentos** y se vuelven a decidir los gastos dudosos. **Está desactivado por defecto porque envía los documentos a un servicio externo** (la API de Anthropic).
+
+1. **Qué documentos se leen**, por este orden y hasta `max_documentos` llamadas por ejecución (`cruce.py → documentos_a_leer`):
+   1. los `candidatos` (3) mejores documentos de cada gasto con **confianza baja**;
+   2. los 3 mejores de cada gasto **sin justificante a revisar** (no los de cofinanciación ni indirectos);
+   3. los **documentos sin gasto**.
+
+   Solo se leen PDF e imágenes (JPG, PNG) de una carpeta local.
+2. **Cómo se lee cada uno** (`lectura.py → leer_documento`):
+   - Las primeras `max_paginas` (3) páginas del PDF se convierten en JPEG a 130 dpi con PyMuPDF.
+   - Se mandan en **una sola llamada** al modelo `claude-sonnet-5-5`, que responde con un JSON de esquema fijo (salida estructurada): `tipo`, `importe_total`, `moneda`, `fecha`, `proveedor`, `num_factura`, `manuscrito`, `legible`.
+   - Las instrucciones piden dejar vacío lo que no se lea, sin inventarlo.
+   - **Caché:** el resultado se guarda en `output/cache_lectura/`, con clave = hash del archivo (más el modelo y `max_paginas`). Un documento ya leído no vuelve a costar nada, aunque cambie de nombre.
+   - Si una lectura falla (respuesta cortada, rechazada o error de la API), el documento queda como «no leído» y se sigue con el resto. Los fallos no se guardan en la caché.
+3. **Señales nuevas** al puntuar un par gasto–documento leído (`cruce.py → _senales_contenido`):
+
+   | Señal | Efecto en la puntuación |
+   |---|---|
+   | El importe del gasto coincide con el total del documento (±1 %) | `+0,30` |
+   | Dentro del documento se lee el nº de factura del gasto | `+0,35` |
+   | Dentro del documento se lee otro nº de factura | `−0,15` |
+   | La fecha del documento está a ±3 días de la del gasto | `+0,10` |
+   | El proveedor del documento se parece al del gasto | `+0,10` |
+
+   - El importe se compara en **moneda local** (`listado.columnas.importe_local`); el importe en euros solo se usa si el documento está en euros.
+   - Un importe distinto **no resta**: un documento puede cubrir varios gastos.
+   - Un documento ilegible no suma ni resta; el motivo lo dice.
+4. **Volver a decidir** (`cruce.py → revisar_con_contenido`): solo los gastos del punto 1. Los gastos con confianza alta o media no se tocan.
+5. **Conflicto entre nombre y contenido:** el gasto sale con **confianza baja** y un aviso en el motivo si
+   - por el nombre el justificante sería un documento, pero el contenido de otro encaja mejor; o
+   - el documento elegido tiene dentro otro nº de factura, o ni el importe ni la fecha ni el proveedor coinciden (habiendo al menos dos de ellos para comparar).
+6. El **motivo** explica lo que se ha leído dentro del documento y, si el resultado ha cambiado, cuál era solo por el nombre.
+
+Los pesos tienen valores por defecto en `cruce.py → DEFECTOS_CONTENIDO` y se cambian en la sección `contenido:` del YAML.
+
 ## 6. Configuración por proyecto (YAML)
 
 Todo lo específico de un proyecto está en `config/<proyecto>.yaml`. **Un proyecto nuevo es un YAML nuevo, sin tocar código.** Las rutas son relativas a la raíz del repositorio y las columnas se indican por número (A = 0).
@@ -184,7 +226,7 @@ Todo lo específico de un proyecto está en `config/<proyecto>.yaml`. **Un proye
 | `drive.credenciales` / `drive.token` | (drive) JSON de credenciales de Google y dónde guardar el token. Por defecto `.secrets/credentials.json` y `.secrets/token.json` |
 | `listado.archivo` / `hoja` | Excel local con el listado de gastos y su hoja |
 | `listado.drive` | (opcional) URL del listado en Drive (Excel u Hoja de cálculo de Google). Si se indica, tiene prioridad sobre `archivo` y necesita permiso de lectura |
-| `listado.columnas` | Posición de: `partida`, `orden` (solo para validar), `fecha`, `factura`, `proveedor`, `descripcion`, `importe_eur`, `pago` |
+| `listado.columnas` | Posición de: `partida`, `orden` (solo para validar), `fecha`, `factura`, `proveedor`, `descripcion`, `importe_eur`, `importe_local` (opcional; se compara con el total leído en el documento), `pago` |
 | `listado.columnas_referencia` | Columnas extra con referencias (p. ej. el código contable en ECHO) |
 | `listado.imputacion.donante` / `otros` | Columnas con el importe imputado al donante y a otros financiadores |
 | `listado.partidas_indirectos` | Regex de las partidas de costes indirectos |
@@ -194,6 +236,12 @@ Todo lo específico de un proyecto está en `config/<proyecto>.yaml`. **Un proye
 | `prefijo_orden` | Regex del nº de orden manual en el nombre del archivo: grupos `desde`/`hasta`/`sufijo` o `lista`. Se oculta al cruzar y se usa al validar |
 | `cruce.*` | Pesos y umbrales (ver sección 5). `conceptos_mes_vencido`: conceptos que se pagan el mes siguiente |
 | `sinonimos` | Palabras equivalentes del dominio (`salario: [nomina, payroll]`) |
+| `contenido.activado` | Leer el contenido de los documentos dudosos. Por defecto `false`; también se activa con `--contenido` |
+| `contenido.modelo` | Modelo de la API de Claude (por defecto `claude-sonnet-5-5`) |
+| `contenido.max_paginas` | Páginas que se leen de cada PDF (por defecto 3) |
+| `contenido.max_documentos` | Tope de llamadas a la API por ejecución (por defecto 50). Los documentos ya leídos salen de la caché y no cuentan |
+| `contenido.candidatos` | Documentos candidatos que se leen por cada gasto dudoso (por defecto 3) |
+| `contenido.bonus_*`, `penalizacion_factura`, `tolerancia_importe`, `dias_fecha`, `similitud_proveedor` | Pesos y tolerancias de las señales del contenido (ver sección 5) |
 
 Ejemplos completos: `config/uganda_adjumani.yaml` (nº de factura `EB UGA04 602`) y `config/echo_colombia.yaml` (código contable `206-15000`).
 
@@ -222,8 +270,24 @@ python -m pytest
 | `--salida ruta.xlsx` | Cambia el Excel de salida (por defecto `output/<nombre_del_yaml>.xlsx`) |
 | `--raiz carpeta` | Raíz para las rutas relativas del YAML (por defecto, la carpeta actual) |
 | `--listar-documentos` | Solo lista los documentos encontrados y termina. Sirve para probar la conexión con Drive |
+| `--contenido` | Lee además el contenido de los documentos dudosos con la API de Claude (ver *Lectura del contenido*). **Envía documentos a un servicio externo** |
 
 Si el Excel de salida está abierto, se guarda una copia con la fecha y hora en el nombre.
+
+### Lectura del contenido
+
+> **No lo ejecutes con documentos de `TUM_SociAI/` hasta que Entreculturas confirme que se puede usar este proveedor** (ver preguntas abiertas, sección 12). Los tests no llaman a la API.
+
+1. Instala las librerías (una vez): `pip install -e ".[dev,contenido]"` (`anthropic`, `pymupdf`, `python-dotenv`).
+2. Copia `.env.example` como `.env` en la raíz del repositorio y pon tu clave en `ANTHROPIC_API_KEY`. El `.env` no se sube a git; el programa nunca muestra la clave.
+3. Ejecuta con `--contenido`:
+   ```cmd
+   python -m conciliador config/mi_proyecto.yaml --contenido
+   ```
+   Antes de llamar, el programa dice cuántos documentos va a enviar y cuántos salen de la caché. Al terminar, cuántos ha leído, cuántos han quedado sin leer por el tope y en cuántos gastos ha cambiado el resultado.
+4. Para controlar el gasto, empieza con un `contenido.max_documentos` bajo. Lo ya leído queda en `output/cache_lectura/`: repetir la ejecución no vuelve a pagar por esos documentos. Para forzar una lectura nueva, borra esa carpeta.
+
+De momento solo funciona con documentos en una **carpeta local**. Con Drive se avisa y se cruza solo por nombre.
 
 ### Google Drive
 
@@ -272,6 +336,8 @@ python -m conciliador config/mi_proyecto.yaml
 - `No encuentro el archivo de credenciales de Google`: falta `.secrets/credentials.json` (ver *Google Drive*).
 - Drive devuelve 0 documentos: la cuenta no tiene acceso a la carpeta. Con cuenta de servicio, comparte la carpeta con su email.
 - Error 403 *accessNotConfigured*: la Google Drive API no está activada en el proyecto de Google Cloud.
+- `Faltan las librerías para leer contenidos`: instala el extra `.[contenido]`.
+- `No encuentro la clave de la API` o `La API ha rechazado la clave`: revisa `ANTHROPIC_API_KEY` en `.env`.
 
 ## 8. El Excel de salida
 
@@ -284,6 +350,10 @@ python -m conciliador config/mi_proyecto.yaml
 | **Documentos** | Cada archivo, cuántos gastos cubre y si es copia u otra versión de otro |
 | **Documentos sin gasto** | Archivos que no corresponden a ninguna línea del listado |
 | **Validación** | Con `--validar`: veredicto gasto a gasto |
+
+Con la lectura del contenido activada se añaden:
+- En *Gastos*, *Documentos* y *Documentos sin gasto*, las columnas **Leído por contenido** (`sí`, `ilegible`, `no` o `no leído: motivo`) y **Datos del contenido** (tipo, importe, fecha, proveedor y nº de factura leídos). En *Gastos* se refieren al documento asignado o, si no hay, al mejor candidato.
+- En *Resumen*, cuántos documentos se han leído y en cuántos gastos ha cambiado el resultado.
 
 **Cómo revisarlo:** filtra *Gastos* por **Confianza = baja**. Después mira *Sin justificante* y *Documentos sin gasto*.
 
@@ -314,6 +384,9 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 - Encuentra **16 de los 17** gastos que tienen documento en la muestra y **no asigna ninguno a un documento equivocado**.
 - Hay 16 asignaciones que la validación cuenta como fallos. Son gastos que comparten comprobante de egreso con el documento. Se revisó a mano el comprobante 15935 y **el PDF contiene de verdad todos esos gastos**: son aciertos que la numeración manual no recogía.
 
+### Lectura del contenido
+**Sin medir todavía.** No se ha ejecutado con documentos reales (falta la aprobación del proveedor). Con la lectura desactivada, las cifras de arriba no cambian: se ha comprobado volviendo a ejecutar `--validar` en los dos proyectos.
+
 ## 10. Decisiones de diseño
 
 - **Drive con el permiso mínimo.** Para listar documentos se pide solo acceso a metadatos. El permiso de lectura solo se pide si el propio listado está en Drive. Las librerías de Google son opcionales (`.[drive]`): sin ellas, el modo local sigue funcionando.
@@ -324,11 +397,24 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 - **Marcar la ambigüedad en vez de elegir a ciegas.** Si dos documentos encajan casi igual, el gasto sale con confianza baja.
 - **Separar "sin justificante" de "no se espera documento".** La cofinanciación y los costes indirectos no son incidencias.
 - **El Excel explica cada decisión** con un motivo en lenguaje natural, porque es una herramienta de apoyo al revisor.
+- **El contenido se lee solo donde el nombre no basta.** Leer cuesta dinero y envía datos fuera: se leen los candidatos de los gastos dudosos y los documentos sin gasto, con un tope de llamadas por ejecución y una caché por hash del archivo. Los gastos con confianza alta o media no se vuelven a decidir.
+- **La lectura está desactivada por defecto** y es una dependencia opcional (`.[contenido]`): sin ella todo funciona igual que antes.
+- **Salida estructurada en vez de una tool forzada.** `claude-sonnet-5-5` rechaza `tool_choice` forzado; con `output_config.format` (JSON schema) se obtiene el mismo JSON garantizado en una llamada.
+- **Dato que no se lee, dato vacío.** El modelo no debe inventar: un dato vacío no suma; uno inventado asociaría el gasto al documento equivocado.
+- **Un importe distinto no penaliza.** Un mismo documento puede cubrir varios gastos (comprobantes de egreso de ECHO), así que su total no tiene por qué ser el del gasto.
+- **Si el nombre y el contenido no apuntan al mismo documento, no se elige a ciegas:** el gasto sale con confianza baja y el motivo lo explica.
+- **La clave de la API vive en `.env`** y la recoge directamente el cliente oficial: el código no la lee, no la imprime y no la guarda.
 
 ## 11. Limitaciones conocidas
 
 - Depende de que los nombres de archivo sean informativos. Con nombres genéricos ("Combustible Septiembre"), el cruce es débil.
-- No comprueba importes ni fechas dentro del PDF: eso es la fase 1.
+- La lectura del contenido **no se ha probado con documentos reales**: solo con una API simulada. No se sabe aún cuánto mejora el cruce, cuánto cuesta ni cómo de bien lee los manuscritos.
+- Los pesos de las señales del contenido son un punto de partida **sin calibrar**.
+- La lectura solo funciona con documentos en una carpeta local, no con Drive (haría falta permiso de lectura y descargar los archivos).
+- Solo se leen PDF e imágenes, y solo las primeras páginas: en un PDF con varios justificantes se extrae el principal.
+- En proyectos con muchos gastos del mismo importe (nóminas mensuales), la coincidencia de importe puede dar falsos positivos.
+- Sin `importe_local` en el YAML, el importe solo se compara si el documento está en euros.
+- Un rechazo del modelo se trata como «no leído»; no se reintenta con otro modelo.
 - Los pesos se ajustaron con Uganda y solo se han probado 2 proyectos.
 - Las series mensuales con criterio de nombrado irregular (cotizaciones de diciembre en Uganda) quedan como ambiguas.
 - La conexión con Google Drive está probada con una API simulada y con los nombres reales de Uganda, pero **aún no contra el Drive de Entreculturas**.
@@ -338,7 +424,8 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 | Fase | Descripción | Estado |
 |---|---|---|
 | 0 | Conciliador gasto ↔ justificante por nombre de archivo | ✅ Hecho (Uganda + ECHO) |
-| 1 | Leer la primera página de cada PDF emparejado (LLM con visión) y verificar importe, fecha y proveedor | Pendiente |
+| 1 | Leer el contenido de los documentos dudosos (LLM con visión) y usar importe, fecha, proveedor y nº de factura en el cruce | 🟡 Programado y probado con API simulada; **falta ejecutarlo con documentos reales**, medirlo y calibrar los pesos |
+| 1b | Leer también documentos de Drive (descarga con permiso de lectura) y verificar los gastos ya asignados con confianza alta o media | Pendiente |
 | 2 | Revisar justificantes con las reglas del donante (`Rules.xlsx`) y evaluar con las incidencias reales de Tigray | Pendiente |
 | 3 | Proceso 2: presupuesto aprobado frente a ejecutado por partida y topes del donante (Rioja, AECID, Uganda) | Pendiente |
 | 4 | Fuente de documentos en Google Drive (`drive.py` + `fuentes.py`, permiso de solo metadatos) | ✅ Hecho; falta probarlo con el Drive real |
@@ -347,7 +434,7 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 - ¿Cómo está organizado Drive? ¿Quién nombra los archivos y con qué convención?
 - ¿Podemos tener acceso de solo lectura a una carpeta de prueba? ¿Con nuestra cuenta (OAuth) o con una cuenta de servicio creada por ellos?
 - ¿El listado de gastos está también en Drive (Excel u Hoja de cálculo de Google)?
-- ¿Qué proveedor de IA está permitido para leer el contenido de los documentos (RGPD)?
+- ¿Qué proveedor de IA está permitido para leer el contenido de los documentos (RGPD)? **Bloquea la fase 1:** el código usa la API de Anthropic y no se ejecutará con documentos reales hasta tener respuesta.
 - ¿Qué significa el nº de orden "N/A" en el listado?
 - ¿Los costes indirectos se justifican siempre con certificado?
 - ¿Hay un proyecto en curso para probarlo en real?
@@ -375,3 +462,4 @@ Este archivo es el **contexto compartido** del equipo y de las IAs que usemos. R
 | 14/11/2026 | Clasificación de gastos sin documento: revisar / cofinanciación / coste indirecto |
 | 14/11/2026 | README reescrito como fuente de verdad; añadidos `AGENTS.md` y `CLAUDE.md` |
 | 14/11/2026 | **Google Drive**: documentos desde una carpeta de Drive (recursivo, unidades compartidas, atajos), listado opcional desde Drive, OAuth o cuenta de servicio, `--listar-documentos`, plantilla `config/ejemplo_drive.yaml`, tests con API simulada |
+| 14/11/2026 | **Lectura del contenido** (opcional, desactivada por defecto): `lectura.py` (API de Claude con salida estructurada y caché por hash), señales de importe, fecha, proveedor y nº de factura en el cruce, aviso de conflicto nombre/contenido, sección `contenido:` del YAML, `--contenido`, columnas nuevas en el Excel, `importe_local` en el listado, extra `.[contenido]`, tests con API simulada. Sin ejecutar con documentos reales |

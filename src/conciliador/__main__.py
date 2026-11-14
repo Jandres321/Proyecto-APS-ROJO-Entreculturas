@@ -1,6 +1,7 @@
 """Uso:
     python -m conciliador config/uganda_adjumani.yaml [--validar] [--salida output/x.xlsx]
     python -m conciliador config/mi_proyecto_drive.yaml --listar-documentos   # probar la conexión
+    python -m conciliador config/uganda_adjumani.yaml --contenido             # leer además los PDF dudosos
 """
 from __future__ import annotations
 
@@ -43,6 +44,31 @@ def _ruta_listado(cfg_listado: dict, raiz: Path, servicio) -> Path | None:
     return destino
 
 
+def _leer_contenido(conc: Conciliador, resultados: list, cfg: dict, raiz: Path):
+    """Lee el contenido de los documentos dudosos y vuelve a decidir sus gastos.
+    Devuelve (resultados, resumen de la lectura) o (resultados, None) si no se puede leer."""
+    from .lectura import MAX_PAGINAS, MODELO, Lector, leer_documentos, se_puede_leer
+    c = cfg.get("contenido") or {}
+    if cfg["documentos"].get("tipo", "local") != "local":
+        print("Aviso: la lectura del contenido solo funciona con documentos en una carpeta local; "
+              "se cruza solo por el nombre.")
+        return resultados, None
+    modelo, tope = c.get("modelo", MODELO), int(c.get("max_documentos", 50))
+    lector = Lector(modelo=modelo, max_paginas=int(c.get("max_paginas", MAX_PAGINAS)), raiz=raiz)
+    a_leer = [d for d in conc.documentos_a_leer(resultados) if se_puede_leer(d.ubicacion)]
+    en_cache = sum(lector.en_cache(Path(d.ubicacion)) for d in a_leer)
+    nuevos = min(len(a_leer) - en_cache, tope)
+    print(f"Contenido: {len(a_leer)} documentos por leer, {en_cache} ya leídos antes (caché). "
+          f"Se envían {nuevos} a la API de Anthropic ({modelo}).")
+    resumen = leer_documentos(a_leer, lector, tope)
+    resultados = conc.revisar_con_contenido(resultados)
+    resumen["cambiados"] = sum(bool(r.cambio) for r in resultados)
+    print(f"Contenido: leídos {resumen['leidos']} (ilegibles: {resumen['ilegibles']}) | con error: "
+          f"{resumen['errores']} | sin leer por el tope: {resumen['sin_leer_por_tope']} | "
+          f"gastos cuyo resultado cambia: {resumen['cambiados']}")
+    return resultados, resumen
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Asocia cada gasto del listado con su justificante.")
     ap.add_argument("config", type=Path, help="YAML del proyecto")
@@ -51,6 +77,9 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--raiz", type=Path, default=Path.cwd(), help="Raíz para las rutas relativas del YAML")
     ap.add_argument("--listar-documentos", action="store_true",
                     help="Solo listar los documentos encontrados (útil para probar la conexión con Drive)")
+    ap.add_argument("--contenido", action="store_true",
+                    help="Leer el contenido de los documentos dudosos con la API de Claude (envía los "
+                         "documentos a un servicio externo; requiere el extra .[contenido] y la clave en .env)")
     a = ap.parse_args(argv)
 
     cfg = yaml.safe_load(a.config.read_text(encoding="utf-8"))
@@ -66,18 +95,22 @@ def main(argv: list[str] | None = None) -> int:
 
     gastos = leer_listado(cfg["listado"], raiz, _ruta_listado(cfg["listado"], raiz, servicio))
     conc = Conciliador(cfg.get("cruce", {}), cfg["referencias"], cfg.get("prefijo_orden"),
-                       cfg.get("sinonimos"), cfg["listado"].get("partidas_indirectos"))
+                       cfg.get("sinonimos"), cfg["listado"].get("partidas_indirectos"),
+                       cfg.get("contenido"))
     resultados = conc.conciliar(gastos, documentos)
+    lectura = None
+    if a.contenido or (cfg.get("contenido") or {}).get("activado"):
+        resultados, lectura = _leer_contenido(conc, resultados, cfg, raiz)
 
     val = validar(resultados, documentos, cfg["prefijo_orden"]) if a.validar else None
     salida = a.salida or raiz / "output" / f"{a.config.stem}.xlsx"
     try:
-        escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val)
+        escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val, lectura)
     except PermissionError:
         # El Excel anterior está abierto (Windows lo bloquea): se guarda con otro nombre
         salida = salida.with_name(f"{salida.stem}_{datetime.now():%Y%m%d_%H%M%S}{salida.suffix}")
         print("Aviso: el Excel de salida estaba abierto; se guarda con otro nombre.")
-        escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val)
+        escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val, lectura)
 
     asignados = sum(r.estado == "asignado" for r in resultados)
     clas = Counter(r.clasificacion for r in resultados if r.estado != "asignado")
@@ -97,9 +130,10 @@ def main(argv: list[str] | None = None) -> int:
 
 def _principal() -> int:
     from .drive import ErrorDrive
+    from .lectura import ErrorLectura
     try:
         return main()
-    except (ErrorDrive, FileNotFoundError, ValueError) as e:
+    except (ErrorDrive, ErrorLectura, FileNotFoundError, ValueError) as e:
         print(f"Error: {e}", file=sys.stderr)
         return 1
 

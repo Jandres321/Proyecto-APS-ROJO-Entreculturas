@@ -93,6 +93,7 @@ def leer_listado(cfg: dict, raiz: Path, ruta: Path | None = None) -> list[Gasto]
             descripcion=_a_texto(celda(fila, "descripcion")),
             importe_eur=_a_numero(celda(fila, "importe_eur")),
             pago=_a_texto(celda(fila, "pago")),
+            importe_local=_a_importe(celda(fila, "importe_local")),
             referencia_extra=extra,
             imputado_donante=imp_donante,
             imputado_otros=imp_otros,

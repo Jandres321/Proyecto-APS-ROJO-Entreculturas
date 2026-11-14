@@ -15,6 +15,9 @@ class Documento:
     texto: str = ""              # texto normalizado para comparar
     refs: set[str] = field(default_factory=set)
     meses: set[int] = field(default_factory=set)
+    # Lectura del contenido (opcional, ver lectura.py)
+    contenido: dict | None = None   # datos extraídos del documento; None = no leído
+    lectura: str = ""               # "" (no se intentó) | "leido" | "ilegible" | "no leído: <motivo>"
 
 
 @dataclass
@@ -28,6 +31,7 @@ class Gasto:
     descripcion: str
     importe_eur: float | None
     pago: str = ""
+    importe_local: float | None = None      # importe en moneda local (para comparar con el documento)
     referencia_extra: str = ""   # otras columnas con referencias (p. ej. código contable)
     imputado_donante: float | None = None   # importe imputado al donante (None = no informado)
     imputado_otros: float | None = None     # importe imputado a otros financiadores
@@ -42,6 +46,9 @@ class Candidato:
     documento: Documento
     puntuacion: float
     motivos: list[str]
+    puntos_contenido: float = 0.0   # parte de la puntuación que viene del contenido leído
+    coincidencias: int = 0          # nº de datos del contenido que coinciden con el gasto
+    contradice: bool = False        # el contenido leído no encaja con el gasto
 
 
 @dataclass
@@ -54,3 +61,5 @@ class Resultado:
     ambiguo: bool = False
     # Para gastos sin justificante: "revisar" | "cofinanciacion" | "indirecto"
     clasificacion: str = ""
+    aviso: str = ""              # advertencia extra para el revisor (conflicto nombre/contenido)
+    cambio: str = ""             # qué decía el cruce por nombre, si el contenido lo ha cambiado

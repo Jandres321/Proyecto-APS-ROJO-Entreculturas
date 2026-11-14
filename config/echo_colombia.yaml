@@ -20,6 +20,7 @@ listado:
     fecha: 3
     descripcion: 4
     proveedor: 5
+    importe_local: 6  # Importe en pesos: se compara con el total leído en el documento
     importe_eur: 11   # Total euros equivalentes
     partida: 17       # línea presupuestaria ECHO (II.3.2.3...)
   columnas_referencia: [2]   # Código contable del comprobante de egreso (206-15000, 800-00337...)
@@ -49,6 +50,24 @@ cruce:
   bonus_numero: 0.20
   penalizacion_referencia: 0.15
   conceptos_mes_vencido: [nssf, pension, seguro medico]
+
+# Lectura del CONTENIDO de los documentos con la API de Claude (opcional, ver README sección 5).
+# OJO: envía los documentos a un servicio externo. No activar con documentos reales hasta que
+# Entreculturas apruebe el proveedor. También se activa con la opción --contenido.
+contenido:
+  activado: false
+  modelo: claude-sonnet-5-5
+  max_paginas: 3        # páginas que se leen de cada PDF
+  max_documentos: 50    # tope de llamadas a la API por ejecución (los ya leídos salen de la caché)
+  candidatos: 3         # documentos candidatos que se leen por cada gasto dudoso
+  bonus_importe: 0.30         # el importe del gasto coincide con el total del documento
+  tolerancia_importe: 0.01    # diferencia relativa admitida (1 %)
+  bonus_factura: 0.35         # dentro del documento se lee el nº de factura del gasto
+  penalizacion_factura: 0.15  # dentro del documento se lee otro nº de factura
+  bonus_fecha: 0.10           # la fecha del documento está a ±dias_fecha de la del gasto
+  dias_fecha: 3
+  bonus_proveedor: 0.10       # el proveedor del documento se parece al del gasto
+  similitud_proveedor: 80     # parecido mínimo (0-100)
 
 sinonimos:
   salario: [nomina, payroll, salary, wage]

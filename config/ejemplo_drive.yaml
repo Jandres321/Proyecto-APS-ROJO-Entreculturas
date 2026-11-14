@@ -44,5 +44,10 @@ referencias:
 
 prefijo_orden: '^(?P<desde>\d+)(?:-(?P<hasta>\d+))?(?:\.?\s?(?P<sufijo>[A-Za-z])(?=[\s._]))?(?=[\s.])\.?'
 
+# Lectura del contenido de los documentos (ver config/uganda_adjumani.yaml). De momento solo
+# funciona con documentos en una carpeta local: con Drive se ignora.
+contenido:
+  activado: false
+
 sinonimos:
   salario: [nomina, payroll, salary, wage]

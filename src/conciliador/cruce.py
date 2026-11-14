@@ -5,15 +5,19 @@ Señales:
   - referencia de factura/comprobante presente en el nombre del archivo
   - similitud de concepto (palabras del nombre del archivo contenidas en el gasto)
   - coherencia del mes (el del texto del gasto o, si no hay, el de su fecha)
+  - (opcional) datos leídos del contenido del documento: importe, fecha, proveedor y nº de factura.
+    Solo cuentan en los documentos que se han leído (ver lectura.py); sin lectura, el cruce
+    es exactamente el de los nombres de archivo.
 """
 from __future__ import annotations
 
 import re
+from datetime import date
 
 from rapidfuzz import fuzz
 
 from .modelos import Candidato, Documento, Gasto, Resultado
-from .texto import (extraer_meses, extraer_referencias, numeros_de, preparar_sinonimos,
+from .texto import (extraer_meses, extraer_referencias, normalizar, numeros_de, preparar_sinonimos,
                     quitar_extension, texto_concepto)
 
 DEFECTOS = {
@@ -30,6 +34,19 @@ DEFECTOS = {
     # Gastos que se pagan el mes siguiente al que cubren (cotizaciones): para ellos el mes
     # esperado en el documento es el anterior a la fecha de pago.
     "conceptos_mes_vencido": [],
+}
+
+# Señales del contenido leído (sección `contenido:` del YAML). Sin calibrar con datos reales.
+DEFECTOS_CONTENIDO = {
+    "bonus_importe": 0.30,             # el importe del gasto coincide con el total del documento
+    "tolerancia_importe": 0.01,        # diferencia relativa admitida (1 %)
+    "bonus_factura": 0.35,             # el nº de factura del gasto es el que se lee en el documento
+    "penalizacion_factura": 0.15,      # en el documento se lee otro nº de factura
+    "bonus_fecha": 0.10,               # la fecha del documento está a pocos días de la del gasto
+    "dias_fecha": 3,
+    "bonus_proveedor": 0.10,           # el proveedor del documento se parece al del gasto
+    "similitud_proveedor": 80,         # parecido mínimo (0-100)
+    "candidatos": 3,                   # documentos candidatos que se leen por cada gasto dudoso
 }
 
 
@@ -83,10 +100,36 @@ def _frase_concepto(sim: float) -> str:
     return f"El concepto del archivo no se parece al del gasto ({sim:.0%})."
 
 
+def _a_fecha(texto: str) -> date | None:
+    try:
+        return date.fromisoformat((texto or "")[:10])
+    except ValueError:
+        return None
+
+
+def _clave_factura(texto: str) -> str:
+    """Nº de factura comparable: solo letras y números, en mayúsculas. Vacío si no lleva cifras."""
+    clave = re.sub(r"[^A-Z0-9]", "", (texto or "").upper())
+    return clave if len(clave) >= 3 and any(c.isdigit() for c in clave) else ""
+
+
+def _misma_factura(a: str, b: str) -> bool:
+    corta, larga = sorted((a, b), key=len)
+    return a == b or (len(corta) >= 4 and corta in larga)
+
+
+def _importe_legible(x: float) -> str:
+    return f"{x:,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
+
+
 class Conciliador:
     def __init__(self, cfg_cruce: dict | None, cfg_referencias: dict, patron_prefijo: str | None,
-                 sinonimos: dict | None = None, partidas_indirectos: str | None = None):
+                 sinonimos: dict | None = None, partidas_indirectos: str | None = None,
+                 cfg_contenido: dict | None = None):
         self.p = {**DEFECTOS, **(cfg_cruce or {})}
+        self.pc = {**DEFECTOS_CONTENIDO,
+                   **{k: v for k, v in (cfg_contenido or {}).items() if k in DEFECTOS_CONTENIDO}}
+        self._docs: list[Documento] = []
         self.re_ref = re.compile(cfg_referencias["patron"])
         self.num_largos = bool(cfg_referencias.get("numeros_largos", False))
         self.re_prefijo = re.compile(patron_prefijo) if patron_prefijo else None
@@ -173,7 +216,79 @@ class Conciliador:
                 motivos.append(f"El mes del archivo ({mes_doc}) no coincide con el del gasto "
                                f"({_meses_legibles(exactos) or 'sin fecha'}).")
 
-        return Candidato(documento=d, puntuacion=round(puntos, 4), motivos=motivos)
+        extra, coincidencias, contradice = self._senales_contenido(g, d, motivos)
+        return Candidato(documento=d, puntuacion=round(puntos + extra, 4), motivos=motivos,
+                         puntos_contenido=extra, coincidencias=coincidencias, contradice=contradice)
+
+    def _senales_contenido(self, g: Gasto, d: Documento, motivos: list[str]) -> tuple[float, int, bool]:
+        """Puntos por lo leído DENTRO del documento. Devuelve (puntos, nº de coincidencias, contradice).
+
+        Un importe distinto no resta: un mismo documento puede cubrir varios gastos.
+        """
+        c, pc = d.contenido, self.pc
+        if not c:
+            return 0.0, 0, False
+        if not c.get("legible"):
+            motivos.append("Se ha abierto el documento, pero no se lee lo bastante para comprobar sus datos.")
+            return 0.0, 0, False
+        puntos, coinciden, comparables = 0.0, 0, 0
+
+        # Importe: en moneda local si el listado la tiene; en euros si el documento está en euros
+        total, moneda = c.get("importe_total"), c.get("moneda") or ""
+        del_gasto = [x for x in (g.importe_local, g.importe_eur if moneda in ("", "EUR") else None) if x]
+        if total and del_gasto:
+            comparables += 1
+            leido = f"{_importe_legible(total)} {moneda}".strip()
+            if any(abs(total - x) <= pc["tolerancia_importe"] * abs(x) for x in del_gasto):
+                puntos += pc["bonus_importe"]
+                coinciden += 1
+                motivos.append(f"Dentro del documento, el importe total ({leido}) coincide con el del gasto.")
+            else:
+                motivos.append(f"Dentro del documento, el importe total ({leido}) no es el del gasto "
+                               f"(puede cubrir varios gastos).")
+
+        # Nº de factura
+        fac_gasto, fac_doc = _clave_factura(g.factura), _clave_factura(c.get("num_factura"))
+        otra_factura = False
+        if fac_gasto and fac_doc:
+            if _misma_factura(fac_gasto, fac_doc):
+                puntos += pc["bonus_factura"]
+                coinciden += 1
+                motivos.append(f"Dentro del documento se lee el nº de factura del gasto ({c['num_factura']}).")
+            else:
+                puntos -= pc["penalizacion_factura"]
+                otra_factura = True
+                motivos.append(f"Dentro del documento se lee otro nº de factura ({c['num_factura']}).")
+
+        # Fecha
+        fecha_doc = _a_fecha(c.get("fecha"))
+        if fecha_doc and g.fecha:
+            comparables += 1
+            dias = abs((fecha_doc - g.fecha).days)
+            if dias <= pc["dias_fecha"]:
+                puntos += pc["bonus_fecha"]
+                coinciden += 1
+                motivos.append(f"La fecha del documento ({fecha_doc:%d/%m/%Y}) coincide con la del gasto"
+                               + ("." if dias == 0 else f" (±{dias} días)."))
+            else:
+                motivos.append(f"La fecha del documento ({fecha_doc:%d/%m/%Y}) no coincide con la del gasto.")
+
+        # Proveedor
+        prov_gasto, prov_doc = normalizar(g.proveedor), normalizar(c.get("proveedor") or "")
+        if prov_gasto and prov_doc:
+            comparables += 1
+            if fuzz.token_set_ratio(prov_gasto, prov_doc) >= pc["similitud_proveedor"]:
+                puntos += pc["bonus_proveedor"]
+                coinciden += 1
+                motivos.append(f"El proveedor del documento ({c['proveedor']}) es el del gasto.")
+            else:
+                motivos.append(f"El proveedor del documento ({c['proveedor']}) no parece el del gasto.")
+
+        if c.get("manuscrito"):
+            motivos.append("El documento está escrito a mano: la lectura es menos fiable.")
+        # Contradice: lleva otro nº de factura, o había al menos dos datos comparables y no coincide ninguno
+        contradice = otra_factura or (comparables >= 2 and coinciden == 0)
+        return round(puntos, 4), coinciden, contradice
 
     def clasificar_sin_justificante(self, g: Gasto) -> str:
         """Por qué un gasto puede no tener documento en la carpeta del donante."""
@@ -186,34 +301,93 @@ class Conciliador:
         return "revisar"
 
     # ---------- cruce ----------
+    @staticmethod
+    def _firma(doc: Documento):
+        return (doc.texto, frozenset(doc.meses), frozenset(doc.refs))
+
+    def _candidatos(self, g: Gasto) -> list[Candidato]:
+        return sorted((self.puntuar(g, d) for d in self._docs), key=lambda c: c.puntuacion, reverse=True)
+
+    def _decidir(self, g: Gasto) -> Resultado:
+        cands = self._candidatos(g)
+        mejor = cands[0] if cands else None
+        # El 2º candidato relevante es un documento distinto, no una copia del mismo
+        # (p. ej. el .pdf y el .xlsx de la misma comisión bancaria)
+        segundo = next((c for c in cands[1:] if self._firma(c.documento) != self._firma(mejor.documento)),
+                       None) if mejor else None
+        if mejor is None or mejor.puntuacion < self.p["umbral"]:
+            return Resultado(g, mejor, segundo, "sin_justificante", "",
+                             clasificacion=self.clasificar_sin_justificante(g))
+        ambiguo = bool(segundo and mejor.puntuacion - segundo.puntuacion < self.p["margen_ambiguo"])
+        aviso = ""
+        # Solo con contenido leído: ¿apuntan el nombre y el contenido a documentos distintos?
+        por_nombre = max(cands, key=lambda c: c.puntuacion - c.puntos_contenido)
+        nombre_apunta_a_otro = (self._firma(por_nombre.documento) != self._firma(mejor.documento)
+                                and por_nombre.puntuacion - por_nombre.puntos_contenido >= self.p["umbral"])
+        if mejor.puntos_contenido > 0 and nombre_apunta_a_otro:
+            ambiguo = True
+            aviso = (f"Ojo: por el nombre del archivo el justificante sería «{por_nombre.documento.nombre}», "
+                     f"pero lo que se lee dentro de «{mejor.documento.nombre}» encaja mejor con el gasto. "
+                     f"Revisar los dos (puede haber un archivo mal nombrado).")
+        elif mejor.contradice:
+            ambiguo = True
+            aviso = ("Ojo: el nombre del archivo encaja con el gasto, pero lo que se lee dentro del "
+                     "documento no. Revisar si el archivo está mal nombrado.")
+        if ambiguo:
+            confianza = "baja"
+        elif mejor.puntuacion >= self.p["umbral_alta"]:
+            confianza = "alta"
+        else:
+            confianza = "media"
+        return Resultado(g, mejor, segundo, "asignado", confianza, ambiguo, aviso=aviso)
+
     def conciliar(self, gastos: list[Gasto], documentos: list[Documento]) -> list[Resultado]:
-        docs = [self.preparar_documento(d) for d in documentos]
+        docs = self._docs = [self.preparar_documento(d) for d in documentos]
         # Cuántos documentos distintos (sin contar copias del mismo) llevan cada referencia
         firmas_por_ref: dict[str, set] = {}
         for d in docs:
             for r in d.refs:
                 firmas_por_ref.setdefault(r, set()).add((d.texto, frozenset(d.meses)))
         self._docs_por_ref = {r: len(f) for r, f in firmas_por_ref.items()}
-        resultados = []
-        for g in gastos:
-            self.preparar_gasto(g)
-            cands = sorted((self.puntuar(g, d) for d in docs), key=lambda c: c.puntuacion, reverse=True)
-            mejor = cands[0] if cands else None
-            # El 2º candidato relevante es un documento distinto, no una copia del mismo
-            # (p. ej. el .pdf y el .xlsx de la misma comisión bancaria)
-            def firma(doc):
-                return (doc.texto, frozenset(doc.meses), frozenset(doc.refs))
-            segundo = next((c for c in cands[1:] if firma(c.documento) != firma(mejor.documento)), None) if mejor else None
-            if mejor is None or mejor.puntuacion < self.p["umbral"]:
-                resultados.append(Resultado(g, mejor, segundo, "sin_justificante", "",
-                                            clasificacion=self.clasificar_sin_justificante(g)))
+        return [self._decidir(self.preparar_gasto(g)) for g in gastos]
+
+    # ---------- contenido (opcional) ----------
+    @staticmethod
+    def _dudoso(r: Resultado) -> bool:
+        """Gastos que merece la pena comprobar leyendo documentos."""
+        return r.confianza == "baja" if r.estado == "asignado" else r.clasificacion == "revisar"
+
+    def documentos_a_leer(self, resultados: list[Resultado]) -> list[Documento]:
+        """Documentos cuyo contenido conviene leer, por orden de prioridad y sin repetir:
+        1) candidatos de los gastos con confianza baja, 2) candidatos de los gastos sin
+        justificante (a revisar), 3) documentos que no se han asignado a ningún gasto."""
+        elegidos: dict[str, Documento] = {}
+        n = int(self.pc["candidatos"])
+        for grupo in ("asignado", "sin_justificante"):
+            for r in resultados:
+                if r.estado == grupo and self._dudoso(r):
+                    for c in self._candidatos(r.gasto)[:n]:
+                        elegidos.setdefault(c.documento.id, c.documento)
+        asignados = {r.mejor.documento.id for r in resultados if r.estado == "asignado"}
+        for d in self._docs:
+            if d.id not in asignados:
+                elegidos.setdefault(d.id, d)
+        return list(elegidos.values())
+
+    def revisar_con_contenido(self, resultados: list[Resultado]) -> list[Resultado]:
+        """Vuelve a decidir los gastos dudosos, ahora con lo leído en los documentos.
+        El resto de gastos se queda como estaba."""
+        def describir(r: Resultado) -> str:
+            if r.estado != "asignado":
+                return "sin justificante"
+            return f"«{r.mejor.documento.nombre}» con confianza {r.confianza}"
+        salida = []
+        for r in resultados:
+            if not self._dudoso(r):
+                salida.append(r)
                 continue
-            ambiguo = bool(segundo and mejor.puntuacion - segundo.puntuacion < self.p["margen_ambiguo"])
-            if ambiguo:
-                confianza = "baja"
-            elif mejor.puntuacion >= self.p["umbral_alta"]:
-                confianza = "alta"
-            else:
-                confianza = "media"
-            resultados.append(Resultado(g, mejor, segundo, "asignado", confianza, ambiguo))
-        return resultados
+            nuevo = self._decidir(r.gasto)
+            if describir(nuevo) != describir(r):
+                nuevo.cambio = f"Solo por el nombre del archivo el resultado era: {describir(r)}."
+            salida.append(nuevo)
+        return salida
