@@ -1,6 +1,9 @@
 # Documentación confidencial de Entreculturas y prototipo TUM (datos personales y financieros: no subir)
 TUM_SociAI/
 
+# Contexto interno para chats (no subir)
+CONTEXTO.md
+
 # Python
 __pycache__/
 *.pyc
