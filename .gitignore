@@ -13,6 +13,10 @@ venv/
 # Secretos y configuración local
 .env
 *.key
+.secrets/
+credentials*.json
+token*.json
+client_secret*.json
 
 # Salidas generadas
 output/

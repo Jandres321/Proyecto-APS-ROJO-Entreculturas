@@ -11,6 +11,7 @@ dependencies = ["pandas>=2.0", "openpyxl>=3.1", "xlrd>=2.0", "rapidfuzz>=3.0", "
 
 [project.optional-dependencies]
 dev = ["pytest>=7.0"]
+drive = ["google-api-python-client>=2.100", "google-auth>=2.20", "google-auth-oauthlib>=1.0"]
 
 [tool.setuptools.packages.find]
 where = ["src"]

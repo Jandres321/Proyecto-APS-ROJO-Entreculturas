@@ -1,0 +1,48 @@
+# PLANTILLA para un proyecto con los documentos en Google Drive.
+# Copia este archivo, rellena las URLs y ajusta las columnas a vuestro listado.
+# Probar la conexión:  python -m conciliador config/<este_archivo>.yaml --listar-documentos
+proyecto: "Nombre del proyecto"
+
+drive:
+  # JSON descargado de Google Cloud (OAuth "App de escritorio" o cuenta de servicio).
+  # Ver README, sección "Google Drive". La carpeta .secrets/ no se sube a git.
+  credenciales: ".secrets/credentials.json"
+  token: ".secrets/token.json"          # se crea solo la primera vez (OAuth)
+
+documentos:
+  tipo: drive
+  # URL de la carpeta (o solo su id). Se recorren también las subcarpetas.
+  carpeta: "https://drive.google.com/drive/folders/PEGA_AQUI_EL_ID_DE_LA_CARPETA"
+  recursivo: true
+  excluir:
+    - "Informe_economico*"
+
+listado:
+  # Opción A: listado en local
+  archivo: "ruta/al/listado.xlsx"
+  # Opción B: listado en Drive (Excel o Hoja de cálculo de Google). Si se pone, manda sobre
+  # 'archivo'. OJO: exige permiso de LECTURA de Drive, no solo de metadatos.
+  # drive: "https://docs.google.com/spreadsheets/d/PEGA_AQUI_EL_ID/edit"
+  hoja: "Relación de facturas"
+  columnas:
+    partida: 0
+    orden: 1
+    fecha: 2
+    factura: 3
+    proveedor: 4
+    descripcion: 5
+    importe_eur: 7
+  imputacion:
+    donante: [11]
+    otros: [12, 13]
+  partidas_indirectos: '^B[\.\s]'
+  obligatorias: [fecha, factura]
+
+referencias:
+  patron: '(?<![A-Z])(?P<prefijo>[A-Z]{2})[\s\-_]*UGA\d{2}[\s\-_]*(?P<numero>\d+)'
+  numeros_largos: true
+
+prefijo_orden: '^(?P<desde>\d+)(?:-(?P<hasta>\d+))?(?:\.?\s?(?P<sufijo>[A-Za-z])(?=[\s._]))?(?=[\s.])\.?'
+
+sinonimos:
+  salario: [nomina, payroll, salary, wage]

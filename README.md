@@ -4,7 +4,7 @@ Herramienta de apoyo para **agilizar la justificación económica** de los proye
 
 > **Este README es la fuente de verdad del proyecto.** Está pensado para que cualquier persona, o cualquier IA (Claude, ChatGPT, Gemini, Copilot…), entienda el proyecto completo leyendo solo este archivo. Hay que **actualizarlo en cada cambio** (ver [Mantener este README](#13-mantener-este-readme)).
 
-**Estado (14/11/2026):** fase 0 terminada. Ya funciona un **conciliador gasto ↔ justificante** que no usa IA. Está probado con 2 proyectos reales de donantes distintos: Uganda (Xunta) y ECHO Colombia. La siguiente fase es leer el contenido de los PDF.
+**Estado (14/11/2026):** fase 0 terminada. Ya funciona un **conciliador gasto ↔ justificante** que no usa IA. Está probado con 2 proyectos reales de donantes distintos: Uganda (Xunta) y ECHO Colombia. Los documentos pueden estar en una **carpeta local o en Google Drive**; la conexión con Drive está probada con una API simulada y falta probarla con el Drive real de Entreculturas. La siguiente fase es leer el contenido de los PDF.
 
 ---
 
@@ -15,7 +15,7 @@ Herramienta de apoyo para **agilizar la justificación económica** de los proye
 4. [Estructura del repositorio](#4-estructura-del-repositorio)
 5. [Cómo funciona el conciliador](#5-cómo-funciona-el-conciliador)
 6. [Configuración por proyecto (YAML)](#6-configuración-por-proyecto-yaml)
-7. [Instalación y uso](#7-instalación-y-uso)
+7. [Instalación y uso](#7-instalación-y-uso) (incluye [Google Drive](#google-drive))
 8. [El Excel de salida](#8-el-excel-de-salida)
 9. [Resultados](#9-resultados)
 10. [Decisiones de diseño](#10-decisiones-de-diseño)
@@ -103,24 +103,27 @@ Nosotros no partimos de su código. Sus reglas (`Rules.xlsx`) servirán para la 
 ├── CLAUDE.md                  # Remite a AGENTS.md (Claude Code)
 ├── config/                    # Un YAML por proyecto: describe sus datos
 │   ├── uganda_adjumani.yaml   #   piloto (Xunta, Uganda)
-│   └── echo_colombia.yaml     #   segundo caso (ECHO, Colombia)
+│   ├── echo_colombia.yaml     #   segundo caso (ECHO, Colombia)
+│   └── ejemplo_drive.yaml     #   plantilla para un proyecto con documentos en Google Drive
 ├── src/conciliador/           # Código del conciliador
 │   ├── __main__.py            #   CLI: lee config → cruza → valida → escribe Excel
 │   ├── modelos.py             #   Estructuras: Documento, Gasto, Candidato, Resultado
 │   ├── listado.py             #   Lee el listado de gastos (.xls/.xlsx) → lista de Gasto
-│   ├── fuentes.py             #   Lista documentos (hoy: carpeta local; mañana: Drive)
+│   ├── fuentes.py             #   Lista documentos: CarpetaLocal o CarpetaDrive (misma interfaz)
+│   ├── drive.py               #   Google Drive: autenticación, listado recursivo, descarga del listado
 │   ├── texto.py               #   Normalización: acentos, plurales, sinónimos, referencias, meses
 │   ├── cruce.py               #   Motor de cruce: puntúa cada par gasto-documento y decide
 │   ├── validacion.py          #   Métricas comparando con la numeración manual
 │   └── salida.py              #   Genera el Excel para el revisor
-├── tests/                     # pytest (sin datos reales)
+├── tests/                     # pytest (sin datos reales; Drive con API simulada)
+├── .secrets/                  # Credenciales y tokens de Google (NO se versiona)
 ├── output/                    # Excels generados (NO se versiona: contienen datos personales)
 ├── TUM_SociAI/                # Datos de Entreculturas (NO se versiona)
 ├── pyproject.toml / requirements.txt
 └── Reto Entreculturas-1.pdf   # Enunciado oficial
 ```
 
-Ignorados por git: `TUM_SociAI/`, `output/`, `CONTEXTO.md`, `.env`, `.venv/`.
+Ignorados por git: `TUM_SociAI/`, `output/`, `.secrets/`, `credentials*.json`, `token*.json`, `CONTEXTO.md`, `.env`, `.venv/`.
 
 ## 5. Cómo funciona el conciliador
 
@@ -130,10 +133,10 @@ Ignorados por git: `TUM_SociAI/`, `output/`, `CONTEXTO.md`, `.env`, `.venv/`.
  config/<proyecto>.yaml
           │
           ▼
- listado.py ──► Gastos ─┐
+ listado.py ──► Gastos ─┐            (listado local o descargado de Drive)
                         ├─► cruce.py ──► Resultados ──► salida.py ──► output/<proyecto>.xlsx
  fuentes.py ──► Docs  ──┘   (texto.py)        │
-                                              └──► validacion.py (opcional, --validar)
+ (carpeta local o Drive)                      └──► validacion.py (opcional, --validar)
 ```
 
 ### Paso a paso
@@ -174,8 +177,13 @@ Todo lo específico de un proyecto está en `config/<proyecto>.yaml`. **Un proye
 | Clave | Para qué sirve |
 |---|---|
 | `proyecto` | Nombre que aparece en el Excel |
-| `documentos.tipo` / `ruta` / `excluir` | De dónde salen los documentos y qué archivos ignorar (normativa, el propio listado…) |
-| `listado.archivo` / `hoja` | Excel con el listado de gastos |
+| `documentos.tipo` | `local` o `drive` |
+| `documentos.ruta` | (local) carpeta de los justificantes |
+| `documentos.carpeta` | (drive) URL o id de la carpeta de Drive |
+| `documentos.recursivo` / `excluir` | Recorrer subcarpetas (por defecto sí) y patrones de archivos a ignorar (normativa, el propio listado…) |
+| `drive.credenciales` / `drive.token` | (drive) JSON de credenciales de Google y dónde guardar el token. Por defecto `.secrets/credentials.json` y `.secrets/token.json` |
+| `listado.archivo` / `hoja` | Excel local con el listado de gastos y su hoja |
+| `listado.drive` | (opcional) URL del listado en Drive (Excel u Hoja de cálculo de Google). Si se indica, tiene prioridad sobre `archivo` y necesita permiso de lectura |
 | `listado.columnas` | Posición de: `partida`, `orden` (solo para validar), `fecha`, `factura`, `proveedor`, `descripcion`, `importe_eur`, `pago` |
 | `listado.columnas_referencia` | Columnas extra con referencias (p. ej. el código contable en ECHO) |
 | `listado.imputacion.donante` / `otros` | Columnas con el importe imputado al donante y a otros financiadores |
@@ -213,13 +221,57 @@ python -m pytest
 | `--validar` | Mide el acierto con la numeración manual. Solo tiene sentido en proyectos ya justificados |
 | `--salida ruta.xlsx` | Cambia el Excel de salida (por defecto `output/<nombre_del_yaml>.xlsx`) |
 | `--raiz carpeta` | Raíz para las rutas relativas del YAML (por defecto, la carpeta actual) |
+| `--listar-documentos` | Solo lista los documentos encontrados y termina. Sirve para probar la conexión con Drive |
 
 Si el Excel de salida está abierto, se guarda una copia con la fecha y hora en el nombre.
+
+### Google Drive
+
+El conciliador puede leer los documentos **directamente de una carpeta de Google Drive**, subcarpetas y unidades compartidas incluidas.
+
+- Para listarlos solo pide permiso de **metadatos** (`drive.metadata.readonly`): ve nombres y enlaces, **nunca el contenido** de los archivos.
+- En el Excel, cada documento enlaza a su página en Drive.
+- El listado de gastos puede seguir en local o descargarse de Drive con `listado.drive`. En ese caso el permiso pasa a ser de **lectura** (`drive.readonly`), porque hay que abrir el Excel.
+
+**1. Instalar las librerías de Google** (una vez):
+```cmd
+pip install -e ".[dev,drive]"
+```
+Para Drive se recomienda Python 3.11 o superior: las librerías de Google avisan de que dejarán de dar soporte a la 3.10.
+
+**2. Crear las credenciales** (una vez por equipo u organización). Hay dos opciones:
+
+*Opción A, con tu cuenta de Google (OAuth)*. Es la más sencilla para probar:
+1. Entra en [Google Cloud Console](https://console.cloud.google.com/) y crea un proyecto, o usa uno existente.
+2. *APIs y servicios → Biblioteca* → activa **Google Drive API**.
+3. *APIs y servicios → Pantalla de consentimiento OAuth*: tipo *Interno* si es una cuenta de la organización, o *Externo* añadiendo tu correo como usuario de prueba.
+4. *Credenciales → Crear credenciales → ID de cliente de OAuth → Aplicación de escritorio* → descarga el JSON.
+5. Guárdalo como **`.secrets/credentials.json`** en la raíz del repositorio.
+6. La primera ejecución abrirá el navegador para dar permiso. El token se guarda en `.secrets/` y no vuelve a preguntar.
+
+*Opción B, con una cuenta de servicio*. Sin navegador, para un uso automatizado:
+1. Pasos 1 y 2 de la opción A.
+2. *Credenciales → Crear credenciales → Cuenta de servicio* → en ella, *Claves → Agregar clave → JSON*.
+3. Guarda el JSON como `.secrets/credentials.json`.
+4. **Comparte la carpeta de Drive** (y el listado, si está en Drive) con el email de la cuenta de servicio (`…@….iam.gserviceaccount.com`), con permiso de *Lector*.
+
+El programa detecta solo qué tipo de credencial es. **Las credenciales nunca se suben a git** (`.secrets/` está en el `.gitignore`).
+
+**3. Configurar el proyecto:** copia `config/ejemplo_drive.yaml`, pega la URL de la carpeta en `documentos.carpeta` y ajusta el listado y las columnas.
+
+**4. Probar la conexión y ejecutar:**
+```cmd
+python -m conciliador config/mi_proyecto.yaml --listar-documentos
+python -m conciliador config/mi_proyecto.yaml
+```
 
 **Problemas frecuentes:**
 - `ModuleNotFoundError: conciliador`: el entorno no está activado.
 - `No existe la carpeta de documentos`: falta `TUM_SociAI/` o la ruta del YAML no coincide.
 - Casi todo sale sin justificante: revisa los números de columna en `listado.columnas`.
+- `No encuentro el archivo de credenciales de Google`: falta `.secrets/credentials.json` (ver *Google Drive*).
+- Drive devuelve 0 documentos: la cuenta no tiene acceso a la carpeta. Con cuenta de servicio, comparte la carpeta con su email.
+- Error 403 *accessNotConfigured*: la Google Drive API no está activada en el proyecto de Google Cloud.
 
 ## 8. El Excel de salida
 
@@ -264,6 +316,7 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 
 ## 10. Decisiones de diseño
 
+- **Drive con el permiso mínimo.** Para listar documentos se pide solo acceso a metadatos. El permiso de lectura solo se pide si el propio listado está en Drive. Las librerías de Google son opcionales (`.[drive]`): sin ellas, el modo local sigue funcionando.
 - **Empezar sin IA, solo con nombres de archivo.** Es barato, rápido y explicable. Con Drive bastará un permiso de solo metadatos, sin acceso al contenido. Es el paso previo a leer los PDF.
 - **No usar la numeración manual para cruzar.** Es el trabajo que ya hizo una persona; se usa solo para validar. Así se mide lo que pasaría con un proyecto nuevo.
 - **Configuración por proyecto en YAML.** Cada donante y cada socio nombran distinto: lo que cambia está en la configuración, no en el código.
@@ -278,7 +331,7 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 - No comprueba importes ni fechas dentro del PDF: eso es la fase 1.
 - Los pesos se ajustaron con Uganda y solo se han probado 2 proyectos.
 - Las series mensuales con criterio de nombrado irregular (cotizaciones de diciembre en Uganda) quedan como ambiguas.
-- Solo lee carpetas locales. Google Drive está pendiente.
+- La conexión con Google Drive está probada con una API simulada y con los nombres reales de Uganda, pero **aún no contra el Drive de Entreculturas**.
 
 ## 12. Hoja de ruta y preguntas abiertas
 
@@ -288,11 +341,12 @@ Los pesos se ajustaron con este proyecto, así que estas cifras son optimistas.
 | 1 | Leer la primera página de cada PDF emparejado (LLM con visión) y verificar importe, fecha y proveedor | Pendiente |
 | 2 | Revisar justificantes con las reglas del donante (`Rules.xlsx`) y evaluar con las incidencias reales de Tigray | Pendiente |
 | 3 | Proceso 2: presupuesto aprobado frente a ejecutado por partida y topes del donante (Rioja, AECID, Uganda) | Pendiente |
-| 4 | Fuente de documentos en Google Drive (`fuentes.py`, permiso de solo metadatos) | Pendiente |
+| 4 | Fuente de documentos en Google Drive (`drive.py` + `fuentes.py`, permiso de solo metadatos) | ✅ Hecho; falta probarlo con el Drive real |
 
 **Preguntas abiertas para Entreculturas:**
 - ¿Cómo está organizado Drive? ¿Quién nombra los archivos y con qué convención?
-- ¿Podemos tener acceso de solo lectura a una carpeta de prueba?
+- ¿Podemos tener acceso de solo lectura a una carpeta de prueba? ¿Con nuestra cuenta (OAuth) o con una cuenta de servicio creada por ellos?
+- ¿El listado de gastos está también en Drive (Excel u Hoja de cálculo de Google)?
 - ¿Qué proveedor de IA está permitido para leer el contenido de los documentos (RGPD)?
 - ¿Qué significa el nº de orden "N/A" en el listado?
 - ¿Los costes indirectos se justifican siempre con certificado?
@@ -320,3 +374,4 @@ Este archivo es el **contexto compartido** del equipo y de las IAs que usemos. R
 | 14/11/2026 | Motivos en lenguaje natural; si el Excel está abierto se guarda una copia |
 | 14/11/2026 | Clasificación de gastos sin documento: revisar / cofinanciación / coste indirecto |
 | 14/11/2026 | README reescrito como fuente de verdad; añadidos `AGENTS.md` y `CLAUDE.md` |
+| 14/11/2026 | **Google Drive**: documentos desde una carpeta de Drive (recursivo, unidades compartidas, atajos), listado opcional desde Drive, OAuth o cuenta de servicio, `--listar-documentos`, plantilla `config/ejemplo_drive.yaml`, tests con API simulada |

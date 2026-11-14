@@ -11,6 +11,7 @@ Este archivo lo leen automáticamente Codex, Cursor, GitHub Copilot, Gemini CLI 
   - `TUM_SociAI/` y `output/` contienen datos personales y financieros (nóminas, contratos, extractos). No se versionan.
   - **Nunca** copies su contenido (nombres, importes, cuentas) a archivos que se suban: README, código, tests, commits.
   - Los tests usan datos inventados.
+- **Credenciales de Google:** van en `.secrets/` (ignorado por git). Nunca las leas, las muestres ni las copies a otro sitio. Para Drive se usa el permiso mínimo: metadatos; lectura solo si el listado está en Drive.
 - **No envíes documentos de `TUM_SociAI/` a servicios externos** (APIs de IA, webs) sin la aprobación explícita del equipo. Entreculturas aún no ha confirmado qué proveedor se puede usar.
 - **Lo específico de un proyecto va en su YAML**, no en el código.
 - **El nº de orden manual nunca se usa para cruzar**, solo para validar (ver README, sección 10).

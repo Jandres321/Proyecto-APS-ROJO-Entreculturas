@@ -61,8 +61,9 @@ def _suma(valores) -> float | None:
     return sum(nums) if nums else None
 
 
-def leer_listado(cfg: dict, raiz: Path) -> list[Gasto]:
-    ruta = raiz / cfg["archivo"]
+def leer_listado(cfg: dict, raiz: Path, ruta: Path | None = None) -> list[Gasto]:
+    """Lee el listado. `ruta` permite pasar un archivo ya descargado (p. ej. de Drive)."""
+    ruta = ruta or raiz / cfg["archivo"]
     df = pd.read_excel(ruta, sheet_name=cfg["hoja"], header=None, dtype=object)
     col = cfg["columnas"]
     obligatorias = cfg.get("obligatorias", ["fecha", "factura"])

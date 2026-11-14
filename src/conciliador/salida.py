@@ -131,8 +131,12 @@ def _formatear(ws, df: pd.DataFrame, col_color: str | None = None, col_link: str
         for fila, ubic in enumerate(link_src.tolist(), start=2):
             if ubic:
                 c = ws.cell(fila, j)
-                # Enlace relativo al Excel: funciona al abrirlo en cualquier equipo con la misma estructura
-                c.hyperlink = os.path.relpath(Path(ubic).resolve(), base).replace(os.sep, "/") if base else Path(ubic).resolve().as_uri()
+                if str(ubic).startswith(("http://", "https://")):
+                    c.hyperlink = ubic          # documento en Drive: enlace web
+                else:
+                    # Enlace relativo al Excel: funciona en cualquier equipo con la misma estructura
+                    c.hyperlink = (os.path.relpath(Path(ubic).resolve(), base).replace(os.sep, "/")
+                                   if base else Path(ubic).resolve().as_uri())
                 c.font = Font(color="0563C1", underline="single")
 
 
