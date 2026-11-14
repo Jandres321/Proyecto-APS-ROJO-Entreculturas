@@ -28,6 +28,7 @@ class Gasto:
     descripcion: str
     importe_eur: float | None
     pago: str = ""
+    referencia_extra: str = ""   # otras columnas con referencias (p. ej. código contable)
     orden: str | None = None     # nº de orden manual: solo para validar
     texto: str = ""
     texto_descripcion: str = ""

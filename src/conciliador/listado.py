@@ -47,7 +47,8 @@ def leer_listado(cfg: dict, raiz: Path) -> list[Gasto]:
     obligatorias = cfg.get("obligatorias", ["fecha", "factura"])
 
     def celda(fila, campo):
-        i = col.get(campo)
+        # campo: nombre definido en "columnas" o directamente un nº de columna
+        i = campo if isinstance(campo, int) else col.get(campo)
         return None if i is None else fila.iloc[i]
 
     gastos = []
@@ -57,6 +58,7 @@ def leer_listado(cfg: dict, raiz: Path) -> list[Gasto]:
         if any(not valores.get(c) for c in obligatorias):
             continue
         orden = _a_texto(celda(fila, "orden")) or None
+        extra = " ".join(_a_texto(celda(fila, c)) for c in cfg.get("columnas_referencia", []))
         gastos.append(Gasto(
             fila=idx + 1,
             partida=_a_texto(celda(fila, "partida")),
@@ -66,6 +68,7 @@ def leer_listado(cfg: dict, raiz: Path) -> list[Gasto]:
             descripcion=_a_texto(celda(fila, "descripcion")),
             importe_eur=_a_numero(celda(fila, "importe_eur")),
             pago=_a_texto(celda(fila, "pago")),
+            referencia_extra=extra,
             orden=orden,
         ))
     return gastos

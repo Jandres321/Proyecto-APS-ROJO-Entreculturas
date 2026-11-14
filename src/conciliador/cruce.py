@@ -67,6 +67,7 @@ class Conciliador:
         self.num_largos = bool(cfg_referencias.get("numeros_largos", False))
         self.re_prefijo = re.compile(patron_prefijo) if patron_prefijo else None
         self.sin = preparar_sinonimos(sinonimos)
+        self._docs_por_ref: dict[str, int] = {}
         self.mes_vencido = {texto_concepto(c, self.re_ref, self.sin) for c in self.p["conceptos_mes_vencido"]}
 
     # ---------- preparación ----------
@@ -85,7 +86,7 @@ class Conciliador:
         return d
 
     def preparar_gasto(self, g: Gasto) -> Gasto:
-        g.refs = extraer_referencias(g.factura, self.re_ref, self.num_largos)
+        g.refs = extraer_referencias(f"{g.factura} {g.referencia_extra}", self.re_ref, self.num_largos)
         g.texto = texto_concepto(f"{g.descripcion} {g.proveedor} {g.factura}", self.re_ref, self.sin)
         g.texto_descripcion = texto_concepto(g.descripcion, self.re_ref, self.sin)
         return g
@@ -112,7 +113,11 @@ class Conciliador:
         comunes = g.refs & d.refs
         numeros = numeros_de(g.refs) & numeros_de(d.refs)
         if comunes:
-            puntos = max(puntos + p["bonus_referencia"], p["minimo_referencia"])
+            puntos += p["bonus_referencia"]
+            # La referencia basta por sí sola solo si identifica un único documento; si la
+            # comparten varios (p. ej. un comprobante de egreso con varias nóminas), decide el concepto.
+            if any(self._docs_por_ref.get(r, 0) == 1 for r in comunes):
+                puntos = max(puntos, p["minimo_referencia"])
             motivos.append(f"referencia {', '.join(sorted(comunes))}")
         elif numeros:
             puntos += p["bonus_numero"]
@@ -139,6 +144,12 @@ class Conciliador:
     # ---------- cruce ----------
     def conciliar(self, gastos: list[Gasto], documentos: list[Documento]) -> list[Resultado]:
         docs = [self.preparar_documento(d) for d in documentos]
+        # Cuántos documentos distintos (sin contar copias del mismo) llevan cada referencia
+        firmas_por_ref: dict[str, set] = {}
+        for d in docs:
+            for r in d.refs:
+                firmas_por_ref.setdefault(r, set()).add((d.texto, frozenset(d.meses)))
+        self._docs_por_ref = {r: len(f) for r, f in firmas_por_ref.items()}
         resultados = []
         for g in gastos:
             self.preparar_gasto(g)

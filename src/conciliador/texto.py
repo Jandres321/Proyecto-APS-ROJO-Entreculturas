@@ -54,7 +54,12 @@ def extraer_referencias(s: str, patron: re.Pattern, numeros_largos: bool = False
     Los números largos sueltos (nº de factura de 5+ cifras) se guardan como '#numero'.
     """
     s = sin_acentos(str(s)).upper()
-    refs = {f"{re.sub(r'[^A-Z]', '', m.group('prefijo'))}#{int(m.group('numero'))}" for m in patron.finditer(s)}
+    refs = set()
+    for m in patron.finditer(s):
+        prefijo = re.sub(r"[^A-Z0-9]", "", m.group("prefijo"))
+        numero = re.sub(r"[^A-Z0-9]", "", m.group("numero"))
+        numero = str(int(numero)) if numero.isdigit() else numero
+        refs.add(f"{prefijo}#{numero}")
     if numeros_largos:
         refs |= {f"#{int(n)}" for n in _NUM_LARGO.findall(patron.sub(" ", s))}
     return refs
@@ -71,8 +76,8 @@ def quitar_referencias(s: str, patron: re.Pattern) -> str:
 
 def raiz(tok: str) -> str:
     """Singular aproximado (es/en): salarios->salario, comisiones->comision, vehiculos->vehiculo."""
-    if len(tok) > 5 and tok.endswith("ones"):
-        return tok[:-2]
+    if len(tok) > 5 and tok.endswith("es") and tok[-3] in "lnrdzj":
+        return tok[:-2]       # materiales->material, examenes->examen, comisiones->comision
     if len(tok) > 4 and tok.endswith("s") and not tok.endswith("ss"):
         return tok[:-1]
     return tok

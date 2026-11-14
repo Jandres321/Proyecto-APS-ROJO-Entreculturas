@@ -34,8 +34,17 @@ def test_raiz_singulariza():
     assert raiz("salarios") == "salario"
     assert raiz("comisiones") == "comision"
     assert raiz("vehiculos") == "vehiculo"
+    assert raiz("materiales") == "material"
+    assert raiz("examenes") == "examen"
 
 
 def test_texto_concepto_unifica_sinonimos_y_quita_ruido():
     sin = preparar_sinonimos({"salario": ["nomina"]})
     assert texto_concepto("Nóminas de junio EB UGA04 059", PATRON, sin) == "salario"
+
+
+def test_referencias_codigo_contable():
+    pat = re.compile(r'(?<![0-9])(?P<prefijo>\d{3})-(?P<numero>[A-Z]{0,3}\d{3,})')
+    assert extraer_referencias("Equipos_50_51_52_53-206-15000", pat) == {"206#15000"}
+    assert extraer_referencias("Personal_91_800-00337-Cachimbo", pat) == {"800#337"}
+    assert extraer_referencias("Materiales_657_112-PA975", pat) == {"112#PA975"}

@@ -78,15 +78,25 @@ Sin instalar el paquete: `PYTHONPATH=src python -m conciliador ...`
 
 | Métrica | Resultado |
 |---|---|
-| Exactitud | 89,5 % (162/181) |
+| Exactitud | 89,5 % (161/181) |
 | Precisión de lo asignado | 93,1 % |
 | Acierto con confianza **alta** | 78/78 (100 %) |
 | Acierto con confianza **media** | 54/54 (100 %) |
-| Acierto con confianza **baja** | 30/42 (71 %): la herramienta avisa de que hay que revisarlos |
+| Acierto con confianza **baja** | 29/41 (71 %): la herramienta avisa de que hay que revisarlos |
 
 Los errores que quedan son ambigüedades reales del propio nombrado. Por ejemplo, las cotizaciones de diciembre están nombradas por el mes de pago y no por el mes que cubren, al contrario que en el resto del año. También aparecen hallazgos útiles: documentos en la carpeta que no están en el listado y gastos sin justificante.
 
-> Los pesos se ajustaron sobre este mismo proyecto, así que el resultado es optimista. El siguiente paso es probarlo en otro proyecto sin retocar el código, solo con su YAML.
+> Los pesos se ajustaron sobre este mismo proyecto, así que el resultado es optimista.
+
+### Segundo caso (ECHO Colombia), con los mismos pesos
+
+Se ejecuta con `python -m conciliador config/echo_colombia.yaml --validar`. Es otro donante y otra convención de nombres (`Equipos_50_51_52_53-206-15000.pdf`); la referencia es el código contable del comprobante de egreso. Solo se ha escrito su YAML, sin ajustar pesos. La carpeta es una muestra: 12 PDF para ~3.000 gastos.
+
+- Encuentra **16 de los 17** gastos que tienen documento en la muestra y **no asigna ninguno a un documento equivocado**.
+- Ningún gasto de los ~2.950 sin documento se empareja por error con documentos de otro concepto.
+- Hay 16 asignaciones "de más": gastos que comparten comprobante de egreso con un documento de la muestra. Revisado a mano un caso (comprobante 15935), **el PDF contiene de verdad todos esos gastos**: la numeración del nombre del archivo solo citaba uno. Es decir, son aciertos que la validación automática cuenta como fallos.
+
+Regla general añadida a raíz de este caso: una referencia basta por sí sola **solo si identifica un único documento**. Si la comparten varios (p. ej. dos nóminas con el mismo comprobante), decide el concepto.
 
 ## Estructura del repositorio
 

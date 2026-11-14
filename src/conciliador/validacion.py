@@ -22,9 +22,12 @@ def clave_orden(valor: str | None) -> str | None:
 
 
 def ordenes_documento(nombre: str, patron_prefijo: re.Pattern) -> set[str]:
-    m = patron_prefijo.match(nombre)
+    m = patron_prefijo.search(nombre)
     if not m:
         return set()
+    grupos = m.groupdict()
+    if grupos.get("lista"):
+        return {str(int(n)) for n in re.findall(r"\d+", grupos["lista"])}
     desde = int(m.group("desde"))
     hasta = int(m.group("hasta") or desde)
     sufijo = (m.group("sufijo") or "").upper()
