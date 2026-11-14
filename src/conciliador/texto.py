@@ -38,6 +38,11 @@ def quitar_extension(nombre: str) -> str:
     return _EXTENSION.sub("", nombre)
 
 
+def formato_importe(x: float) -> str:
+    """1234.5 -> '1.234,50' (formato español)."""
+    return f"{x:,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
+
+
 def normalizar(s: str) -> str:
     """Minúsculas, sin acentos y solo letras/números separados por un espacio."""
     s = sin_acentos(str(s)).lower()

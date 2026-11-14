@@ -19,6 +19,12 @@ class Documento:
     contenido: dict | None = None   # datos extraídos del documento; None = no leído
     lectura: str = ""               # "" (no se intentó) | "leido" | "ilegible" | "no leído: <motivo>"
 
+    @property
+    def firma(self) -> tuple:
+        """Dos archivos con la misma firma son copias o versiones del mismo documento
+        (p. ej. el .pdf y el .xlsx de la misma comisión bancaria)."""
+        return (self.texto, frozenset(self.meses), frozenset(self.refs))
+
 
 @dataclass
 class Gasto:

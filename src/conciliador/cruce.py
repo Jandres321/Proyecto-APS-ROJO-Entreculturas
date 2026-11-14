@@ -17,8 +17,8 @@ from datetime import date
 from rapidfuzz import fuzz
 
 from .modelos import Candidato, Documento, Gasto, Resultado
-from .texto import (extraer_meses, extraer_referencias, normalizar, numeros_de, preparar_sinonimos,
-                    quitar_extension, texto_concepto)
+from .texto import (extraer_meses, extraer_referencias, formato_importe, normalizar, numeros_de,
+                    preparar_sinonimos, quitar_extension, texto_concepto)
 
 DEFECTOS = {
     "umbral": 0.60,
@@ -100,7 +100,8 @@ def _frase_concepto(sim: float) -> str:
     return f"El concepto del archivo no se parece al del gasto ({sim:.0%})."
 
 
-def _a_fecha(texto: str) -> date | None:
+def _fecha_iso(texto: str) -> date | None:
+    """'2024-05-10' -> date; None si está vacío o no es una fecha."""
     try:
         return date.fromisoformat((texto or "")[:10])
     except ValueError:
@@ -116,10 +117,6 @@ def _clave_factura(texto: str) -> str:
 def _misma_factura(a: str, b: str) -> bool:
     corta, larga = sorted((a, b), key=len)
     return a == b or (len(corta) >= 4 and corta in larga)
-
-
-def _importe_legible(x: float) -> str:
-    return f"{x:,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")
 
 
 class Conciliador:
@@ -238,7 +235,7 @@ class Conciliador:
         del_gasto = [x for x in (g.importe_local, g.importe_eur if moneda in ("", "EUR") else None) if x]
         if total and del_gasto:
             comparables += 1
-            leido = f"{_importe_legible(total)} {moneda}".strip()
+            leido = f"{formato_importe(total)} {moneda}".strip()
             if any(abs(total - x) <= pc["tolerancia_importe"] * abs(x) for x in del_gasto):
                 puntos += pc["bonus_importe"]
                 coinciden += 1
@@ -261,7 +258,7 @@ class Conciliador:
                 motivos.append(f"Dentro del documento se lee otro nº de factura ({c['num_factura']}).")
 
         # Fecha
-        fecha_doc = _a_fecha(c.get("fecha"))
+        fecha_doc = _fecha_iso(c.get("fecha"))
         if fecha_doc and g.fecha:
             comparables += 1
             dias = abs((fecha_doc - g.fecha).days)
@@ -301,10 +298,6 @@ class Conciliador:
         return "revisar"
 
     # ---------- cruce ----------
-    @staticmethod
-    def _firma(doc: Documento):
-        return (doc.texto, frozenset(doc.meses), frozenset(doc.refs))
-
     def _candidatos(self, g: Gasto) -> list[Candidato]:
         return sorted((self.puntuar(g, d) for d in self._docs), key=lambda c: c.puntuacion, reverse=True)
 
@@ -312,8 +305,7 @@ class Conciliador:
         cands = self._candidatos(g)
         mejor = cands[0] if cands else None
         # El 2º candidato relevante es un documento distinto, no una copia del mismo
-        # (p. ej. el .pdf y el .xlsx de la misma comisión bancaria)
-        segundo = next((c for c in cands[1:] if self._firma(c.documento) != self._firma(mejor.documento)),
+        segundo = next((c for c in cands[1:] if c.documento.firma != mejor.documento.firma),
                        None) if mejor else None
         if mejor is None or mejor.puntuacion < self.p["umbral"]:
             return Resultado(g, mejor, segundo, "sin_justificante", "",
@@ -322,7 +314,7 @@ class Conciliador:
         aviso = ""
         # Solo con contenido leído: ¿apuntan el nombre y el contenido a documentos distintos?
         por_nombre = max(cands, key=lambda c: c.puntuacion - c.puntos_contenido)
-        nombre_apunta_a_otro = (self._firma(por_nombre.documento) != self._firma(mejor.documento)
+        nombre_apunta_a_otro = (por_nombre.documento.firma != mejor.documento.firma
                                 and por_nombre.puntuacion - por_nombre.puntos_contenido >= self.p["umbral"])
         if mejor.puntos_contenido > 0 and nombre_apunta_a_otro:
             ambiguo = True

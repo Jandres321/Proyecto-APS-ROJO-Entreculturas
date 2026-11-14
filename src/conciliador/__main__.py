@@ -73,7 +73,8 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Asocia cada gasto del listado con su justificante.")
     ap.add_argument("config", type=Path, help="YAML del proyecto")
     ap.add_argument("--validar", action="store_true", help="Medir acierto contra la numeración manual")
-    ap.add_argument("--salida", type=Path, help="Excel de salida (por defecto output/<config>.xlsx)")
+    ap.add_argument("--salida", type=Path,
+                    help="Excel de salida (por defecto output/<config>_<fecha>_<hora>.xlsx)")
     ap.add_argument("--raiz", type=Path, default=Path.cwd(), help="Raíz para las rutas relativas del YAML")
     ap.add_argument("--listar-documentos", action="store_true",
                     help="Solo listar los documentos encontrados (útil para probar la conexión con Drive)")
@@ -103,11 +104,12 @@ def main(argv: list[str] | None = None) -> int:
         resultados, lectura = _leer_contenido(conc, resultados, cfg, raiz)
 
     val = validar(resultados, documentos, cfg["prefijo_orden"]) if a.validar else None
-    salida = a.salida or raiz / "output" / f"{a.config.stem}.xlsx"
+    # Cada ejecución genera su propio Excel (fecha y hora en el nombre), para poder comparar pruebas
+    salida = a.salida or raiz / "output" / f"{a.config.stem}_{datetime.now():%Y%m%d_%H%M%S}.xlsx"
     try:
         escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val, lectura)
     except PermissionError:
-        # El Excel anterior está abierto (Windows lo bloquea): se guarda con otro nombre
+        # Solo pasa con --salida: ese Excel está abierto (Windows lo bloquea) y se guarda con otro nombre
         salida = salida.with_name(f"{salida.stem}_{datetime.now():%Y%m%d_%H%M%S}{salida.suffix}")
         print("Aviso: el Excel de salida estaba abierto; se guarda con otro nombre.")
         escribir_excel(salida, cfg.get("proyecto", a.config.stem), resultados, documentos, val, lectura)

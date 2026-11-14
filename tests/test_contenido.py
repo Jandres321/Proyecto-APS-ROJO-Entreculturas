@@ -1,5 +1,6 @@
 """Señales del contenido en el cruce, Excel y CLI. Datos inventados; la API está simulada."""
 import json
+import re
 from datetime import date
 from types import SimpleNamespace
 
@@ -215,6 +216,13 @@ def test_cli_sin_la_opcion_no_llama_a_la_api(tmp_path, monkeypatch):
     assert not llamadas and not (tmp_path / "output" / "cache_lectura").exists()
 
 
+def test_cli_salida_explicita_se_respeta(tmp_path, monkeypatch):
+    _proyecto(tmp_path, monkeypatch)
+    destino = tmp_path / "mi_informe.xlsx"
+    assert main([str(tmp_path / "prueba.yaml"), "--raiz", str(tmp_path), "--salida", str(destino)]) == 0
+    assert destino.is_file() and not (tmp_path / "output").exists()
+
+
 def test_cli_con_contenido_lee_guarda_cache_y_respeta_el_tope(tmp_path, monkeypatch, capsys):
     llamadas = _proyecto(tmp_path, monkeypatch)
     args = [str(tmp_path / "prueba.yaml"), "--raiz", str(tmp_path), "--contenido"]
@@ -222,7 +230,9 @@ def test_cli_con_contenido_lee_guarda_cache_y_respeta_el_tope(tmp_path, monkeypa
     assert len(llamadas) == 2
     assert len(list((tmp_path / "output" / "cache_lectura").glob("*.json"))) == 2
     assert "Se envían 2 a la API" in capsys.readouterr().out
-    gastos = pd.read_excel(tmp_path / "output" / "prueba.xlsx", sheet_name="Gastos")
+    (excel,) = (tmp_path / "output").glob("prueba_*.xlsx")
+    assert re.fullmatch(r"prueba_\d{8}_\d{6}\.xlsx", excel.name)      # fecha y hora en el nombre
+    gastos = pd.read_excel(excel, sheet_name="Gastos")
     assert gastos.loc[0, "Estado"] == "Con justificante"
     assert main(args) == 0                       # segunda vez: todo sale de la caché
     assert len(llamadas) == 2

@@ -61,7 +61,7 @@ INSTRUCCIONES = (
 )
 
 
-class ErrorLectura(Exception):
+class ErrorLectura(RuntimeError):
     """Problema que impide leer contenidos (faltan librerías o la clave); mensaje para el usuario."""
 
 
@@ -215,15 +215,19 @@ def leer_documentos(documentos: list[Documento], lector: Lector, max_llamadas: i
     fatales, de_documento = _errores_api()
     r = {"leidos": 0, "de_cache": 0, "llamadas": 0, "ilegibles": 0, "errores": 0,
          "sin_leer_por_tope": 0, "no_legibles_por_tipo": 0}
-    seguidos = 0
+    seguidos = 0        # fallos consecutivos: si la API no responde, no se insiste con el resto
     for d in documentos:
         if not se_puede_leer(d.ubicacion):
             r["no_legibles_por_tipo"] += 1
             continue
         ruta = Path(d.ubicacion)
         cacheado = lector.en_cache(ruta)
-        if not cacheado and (r["llamadas"] >= max_llamadas or seguidos >= max_fallos_seguidos):
-            d.lectura = "no leído: tope de llamadas" if seguidos < max_fallos_seguidos else "no leído: error"
+        if not cacheado and seguidos >= max_fallos_seguidos:
+            d.lectura = "no leído: demasiados errores seguidos"
+            r["errores"] += 1
+            continue
+        if not cacheado and r["llamadas"] >= max_llamadas:
+            d.lectura = "no leído: tope de llamadas"
             r["sin_leer_por_tope"] += 1
             continue
         try:
@@ -236,7 +240,7 @@ def leer_documentos(documentos: list[Documento], lector: Lector, max_llamadas: i
             # Fallo de un documento: se anota y se sigue con el resto
             d.lectura = f"no leído: {e if isinstance(e, ValueError) else type(e).__name__}"
             r["errores"] += 1
-            r["llamadas"] += 0 if cacheado else 1
+            r["llamadas"] += not cacheado      # el intento también cuenta para el tope
             seguidos += 1
             continue
         seguidos = 0
@@ -247,25 +251,3 @@ def leer_documentos(documentos: list[Documento], lector: Lector, max_llamadas: i
         r["de_cache" if cacheado else "llamadas"] += 1
     return r
 
-
-def resumen_contenido(d: Documento) -> str:
-    """Datos leídos en una línea, para el Excel."""
-    c = d.contenido
-    if not c:
-        return ""
-    partes = [c["tipo"].replace("_", " ")]
-    if c["importe_total"] is not None:
-        partes.append(f"{formato_importe(c['importe_total'])} {c['moneda']}".strip())
-    partes += [c["fecha"], c["proveedor"]]
-    if c["num_factura"]:
-        partes.append(f"nº {c['num_factura']}")
-    if c["manuscrito"]:
-        partes.append("manuscrito")
-    if not c["legible"]:
-        partes.append("poco legible")
-    return " · ".join(p for p in partes if p)
-
-
-def formato_importe(x: float) -> str:
-    """1234.5 -> '1.234,50'"""
-    return f"{x:,.2f}".replace(",", "#").replace(".", ",").replace("#", ".")

@@ -15,7 +15,7 @@ Herramienta de apoyo para **agilizar la justificación económica** de los proye
 4. [Estructura del repositorio](#4-estructura-del-repositorio)
 5. [Cómo funciona el conciliador](#5-cómo-funciona-el-conciliador)
 6. [Configuración por proyecto (YAML)](#6-configuración-por-proyecto-yaml)
-7. [Instalación y uso](#7-instalación-y-uso) (incluye [Google Drive](#google-drive))
+7. [Instalación y uso](#7-instalación-y-uso) (incluye [Lectura del contenido](#lectura-del-contenido) y [Google Drive](#google-drive))
 8. [El Excel de salida](#8-el-excel-de-salida)
 9. [Resultados](#9-resultados)
 10. [Decisiones de diseño](#10-decisiones-de-diseño)
@@ -108,10 +108,10 @@ Nosotros no partimos de su código. Sus reglas (`Rules.xlsx`) servirán para la 
 ├── src/conciliador/           # Código del conciliador
 │   ├── __main__.py            #   CLI: lee config → cruza → valida → escribe Excel
 │   ├── modelos.py             #   Estructuras: Documento, Gasto, Candidato, Resultado
+│   ├── texto.py               #   Normalización: acentos, plurales, sinónimos, referencias, meses, formato de importes
 │   ├── listado.py             #   Lee el listado de gastos (.xls/.xlsx) → lista de Gasto
 │   ├── fuentes.py             #   Lista documentos: CarpetaLocal o CarpetaDrive (misma interfaz)
-│   ├── drive.py               #   Google Drive: autenticación, listado recursivo, descarga del listado
-│   ├── texto.py               #   Normalización: acentos, plurales, sinónimos, referencias, meses
+│   ├── drive.py               #   (opcional) Google Drive: autenticación, listado recursivo, descarga del listado
 │   ├── cruce.py               #   Motor de cruce: puntúa cada par gasto-documento y decide
 │   ├── lectura.py             #   (opcional) Lee el contenido de un documento con la API de Claude, con caché
 │   ├── validacion.py          #   Métricas comparando con la numeración manual
@@ -121,9 +121,12 @@ Nosotros no partimos de su código. Sus reglas (`Rules.xlsx`) servirán para la 
 ├── .env.example               # Plantilla de .env (clave de la API de Anthropic). El .env NO se versiona
 ├── output/                    # Excels generados y caché de lecturas (NO se versiona: datos personales)
 ├── TUM_SociAI/                # Datos de Entreculturas (NO se versiona)
-├── pyproject.toml / requirements.txt
+├── pyproject.toml             # Dependencias y extras opcionales: dev, drive, contenido (única fuente de verdad)
+├── requirements.txt           # Atajo: instala el proyecto con todos los extras
 └── Reto Entreculturas-1.pdf   # Enunciado oficial
 ```
+
+**Cómo se reparte el código:** `modelos.py` y `texto.py` no dependen de nada; `listado.py` y `fuentes.py` leen los datos; `cruce.py` decide (no toca disco ni red); `salida.py` y `validacion.py` presentan el resultado; `__main__.py` los encadena. `drive.py` y `lectura.py` son los únicos que hablan con servicios externos y sus librerías se importan solo al usarse.
 
 Ignorados por git: `TUM_SociAI/`, `output/`, `.secrets/`, `credentials*.json`, `token*.json`, `CONTEXTO.md`, `.env`, `.venv/`.
 
@@ -136,7 +139,7 @@ Ignorados por git: `TUM_SociAI/`, `output/`, `.secrets/`, `credentials*.json`, `
           │
           ▼
  listado.py ──► Gastos ─┐            (listado local o descargado de Drive)
-                        ├─► cruce.py ──► Resultados ──► salida.py ──► output/<proyecto>.xlsx
+                        ├─► cruce.py ──► Resultados ──► salida.py ──► output/<proyecto>_<fecha>_<hora>.xlsx
  fuentes.py ──► Docs  ──┘   (texto.py)        │
  (carpeta local o Drive)       ▲              └──► validacion.py (opcional, --validar)
                                │
@@ -267,12 +270,12 @@ python -m pytest
 | Opción | Efecto |
 |---|---|
 | `--validar` | Mide el acierto con la numeración manual. Solo tiene sentido en proyectos ya justificados |
-| `--salida ruta.xlsx` | Cambia el Excel de salida (por defecto `output/<nombre_del_yaml>.xlsx`) |
+| `--salida ruta.xlsx` | Guarda el Excel exactamente en esa ruta, sin fecha ni hora (por defecto `output/<nombre_del_yaml>_<AAAAMMDD>_<HHMMSS>.xlsx`) |
 | `--raiz carpeta` | Raíz para las rutas relativas del YAML (por defecto, la carpeta actual) |
 | `--listar-documentos` | Solo lista los documentos encontrados y termina. Sirve para probar la conexión con Drive |
 | `--contenido` | Lee además el contenido de los documentos dudosos con la API de Claude (ver *Lectura del contenido*). **Envía documentos a un servicio externo** |
 
-Si el Excel de salida está abierto, se guarda una copia con la fecha y hora en el nombre.
+**Cada ejecución genera un Excel nuevo** con la fecha y la hora en el nombre (p. ej. `output/uganda_adjumani_20261114_113404.xlsx`), para poder comparar ejecuciones y pruebas sin pisar las anteriores. Los Excel antiguos no se borran solos: limpia `output/` de vez en cuando. Con `--salida`, si ese Excel está abierto, se guarda una copia con la fecha y hora en el nombre.
 
 ### Lectura del contenido
 
@@ -463,3 +466,5 @@ Este archivo es el **contexto compartido** del equipo y de las IAs que usemos. R
 | 14/11/2026 | README reescrito como fuente de verdad; añadidos `AGENTS.md` y `CLAUDE.md` |
 | 14/11/2026 | **Google Drive**: documentos desde una carpeta de Drive (recursivo, unidades compartidas, atajos), listado opcional desde Drive, OAuth o cuenta de servicio, `--listar-documentos`, plantilla `config/ejemplo_drive.yaml`, tests con API simulada |
 | 14/11/2026 | **Lectura del contenido** (opcional, desactivada por defecto): `lectura.py` (API de Claude con salida estructurada y caché por hash), señales de importe, fecha, proveedor y nº de factura en el cruce, aviso de conflicto nombre/contenido, sección `contenido:` del YAML, `--contenido`, columnas nuevas en el Excel, `importe_local` en el listado, extra `.[contenido]`, tests con API simulada. Sin ejecutar con documentos reales |
+| 14/11/2026 | Limpieza: un único formato de importes (`texto.formato_importe`) y una única firma de documento (`Documento.firma`); `lectura.py` queda solo con la API y el resumen para el Excel pasa a `salida.py`; `requirements.txt` remite a `pyproject.toml`; `AGENTS.md` recoge las reglas de la clave y de la lectura del contenido. Sin cambios en el cruce ni en las métricas |
+| 14/11/2026 | El Excel de salida lleva siempre la fecha y la hora en el nombre (`output/<yaml>_<AAAAMMDD>_<HHMMSS>.xlsx`): cada ejecución genera un archivo distinto. `--salida` sigue usando la ruta exacta |

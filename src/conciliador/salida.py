@@ -9,8 +9,8 @@ import pandas as pd
 from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
-from .lectura import resumen_contenido
 from .modelos import Documento, Resultado
+from .texto import formato_importe
 from .validacion import Validacion
 
 ESTADOS = {
@@ -38,6 +38,24 @@ def _leido(d: Documento | None) -> str:
     return LEIDO.get(d.lectura, d.lectura)
 
 
+def resumen_contenido(d: Documento) -> str:
+    """Datos leídos dentro del documento, en una línea."""
+    c = d.contenido
+    if not c:
+        return ""
+    partes = [c["tipo"].replace("_", " ")]
+    if c["importe_total"] is not None:
+        partes.append(f"{formato_importe(c['importe_total'])} {c['moneda']}".strip())
+    partes += [c["fecha"], c["proveedor"]]
+    if c["num_factura"]:
+        partes.append(f"nº {c['num_factura']}")
+    if c["manuscrito"]:
+        partes.append("manuscrito")
+    if not c["legible"]:
+        partes.append("poco legible")
+    return " · ".join(p for p in partes if p)
+
+
 def _explicacion(r: Resultado) -> str:
     """Texto para el revisor: conclusión, motivos y avisos de la lectura del contenido."""
     return " ".join(t for t in (_explicacion_base(r), r.aviso, r.cambio) if t)
@@ -52,7 +70,7 @@ def _explicacion_base(r: Resultado) -> str:
     if r.estado != "asignado":
         g = r.gasto
         if r.clasificacion == "cofinanciacion":
-            return (f"Gasto imputado a otros financiadores ({g.imputado_otros:,.2f} €) y no al donante: "
+            return (f"Gasto imputado a otros financiadores ({formato_importe(g.imputado_otros)} €) y no al donante: "
                     f"es cofinanciación y normalmente no se incluye en la carpeta del donante.")
         if r.clasificacion == "indirecto":
             return ("Coste indirecto: normalmente se justifica con un certificado de la entidad, no con "
@@ -110,18 +128,15 @@ def _tablas(resultados: list[Resultado], documentos: list[Documento], con_conten
     docs["Gastos asignados"] = docs["Gastos asignados"].fillna(0).astype(int)
     docs["Importe asignado €"] = docs["Importe asignado €"].fillna(0.0)
 
-    # Un documento sin gastos que es copia/otra versión de uno con gastos (mismo concepto,
-    # meses y referencias; p. ej. el .xlsx y el .pdf de la misma comisión) no es un huérfano.
-    def firma(d: Documento):
-        return (d.texto, frozenset(d.meses), frozenset(d.refs))
+    # Un documento sin gastos que es copia/otra versión de uno con gastos (misma firma) no es un huérfano
     con_gastos = set(asignados["Documento"])
     por_firma: dict = {}
     for d in documentos:
         if d.nombre in con_gastos:
-            por_firma.setdefault(firma(d), d.nombre)
+            por_firma.setdefault(d.firma, d.nombre)
     obs = []
     for d in documentos:
-        original = por_firma.get(firma(d))
+        original = por_firma.get(d.firma)
         obs.append(f"Copia u otra versión de: {original}" if d.nombre not in con_gastos and original else "")
     docs["Observación"] = obs
     return gastos, docs

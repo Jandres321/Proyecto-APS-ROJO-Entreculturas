@@ -5,8 +5,9 @@ from types import SimpleNamespace
 import pytest
 
 from conciliador import lectura
-from conciliador.lectura import Lector, leer_documento, leer_documentos, resumen_contenido, se_puede_leer
+from conciliador.lectura import Lector, leer_documento, leer_documentos, se_puede_leer
 from conciliador.modelos import Documento
+from conciliador.salida import resumen_contenido
 
 DATOS = {"tipo": "factura", "importe_total": 1500.0, "moneda": "UGX", "fecha": "2024-05-10",
          "proveedor": "Papelería Inventada", "num_factura": "F-0042", "manuscrito": False, "legible": True}

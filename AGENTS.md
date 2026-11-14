@@ -5,6 +5,7 @@ Este archivo lo leen automáticamente Codex, Cursor, GitHub Copilot, Gemini CLI 
 ## Antes de nada
 1. **Lee `README.md` entero.** Es la fuente de verdad: el reto, los datos, la estructura, cómo funciona el código, la configuración, los resultados, las decisiones y la hoja de ruta.
 2. El código está en `src/conciliador/` y cada proyecto se configura con un YAML en `config/`.
+3. Cada módulo tiene una sola responsabilidad (ver README, sección 4). Lo opcional (Drive, lectura del contenido) se importa solo al usarse y es un extra de `pyproject.toml`.
 
 ## Reglas
 - **Datos confidenciales:**
@@ -12,6 +13,8 @@ Este archivo lo leen automáticamente Codex, Cursor, GitHub Copilot, Gemini CLI 
   - **Nunca** copies su contenido (nombres, importes, cuentas) a archivos que se suban: README, código, tests, commits.
   - Los tests usan datos inventados.
 - **Credenciales de Google:** van en `.secrets/` (ignorado por git). Nunca las leas, las muestres ni las copies a otro sitio. Para Drive se usa el permiso mínimo: metadatos; lectura solo si el listado está en Drive.
+- **Clave de la API de Anthropic:** va en `.env` (ignorado por git). Nunca la leas, la muestres ni la copies; el código tampoco la toca (la recoge el cliente oficial).
+- **La lectura del contenido (`--contenido`) envía documentos a la API de Anthropic.** No la ejecutes con documentos reales; los tests usan una API simulada.
 - **No envíes documentos de `TUM_SociAI/` a servicios externos** (APIs de IA, webs) sin la aprobación explícita del equipo. Entreculturas aún no ha confirmado qué proveedor se puede usar.
 - **Lo específico de un proyecto va en su YAML**, no en el código.
 - **El nº de orden manual nunca se usa para cruzar**, solo para validar (ver README, sección 10).
