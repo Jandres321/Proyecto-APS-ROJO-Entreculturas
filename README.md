@@ -528,6 +528,14 @@ python -m pytest                     # tests del conciliador (los del backend: m
 `DATA_DIR` de esta aplicación puede apuntar a la carpeta `TUM_SociAI/` que usa el conciliador: es el mismo
 conjunto de datos.
 
-**Verificación de la integración (14/11/2026):** tests del conciliador, 57 de 57. Tests del backend fuera de
-Docker con Python 3.12: 265 pasan con los datos reales y 59 se saltan (58 necesitan PostgreSQL y 1 Tesseract);
-**esos 59 no se han ejecutado** tras la fusión.
+**Verificación de la integración (14/11/2026):**
+
+- Tests del conciliador: 57 de 57.
+- Tests del backend con Python 3.12, PostgreSQL (contenedor `db`) y los datos reales, **fuera de Docker y sin
+  Tesseract**: 322 pasan, 1 se salta (pide Tesseract) y **1 falla**:
+  `test_streamlit_app.py::test_launching_the_analysis_runs_the_whole_pipeline`. El análisis de Paraguay termina
+  sin errores, pero el test espera incidencias que salen de leer los PDF con OCR (`AMOUNT_MISMATCH`,
+  `DATE_MISMATCH`...) y no aparecen. Lo más probable es que sea por ejecutarlo sin Tesseract: los cambios de la
+  integración no tocan ese camino (Paraguay no usa el conciliador por nombre y el LLM sigue en `fake`).
+- **Pendiente de confirmar** con `make test` dentro de Docker (que sí trae Tesseract): Docker Desktop se cayó dos
+  veces al construir la imagen y no se pudo ejecutar.
