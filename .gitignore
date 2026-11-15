@@ -48,3 +48,7 @@ dist/
 .DS_Store
 Thumbs.db
 ~$*
+
+# Ground truth de Tigray: datos reales del revisor (no subir)
+backend/eval/tigray_ground_truth.csv
+backend/eval/*_resultados*.csv

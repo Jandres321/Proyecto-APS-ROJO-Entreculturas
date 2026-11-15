@@ -306,6 +306,33 @@ Paraguay, 9 en los 6 gastos con documento.
 - `DONOR_STAMP_MISSING` y `NOT_AN_INVOICE` son heurísticos; `ILLEGIBLE` no tiene norma detrás (criterio de
   Entreculturas) y así consta en su `reference`.
 
+## Evaluación con Tigray (`backend/eval/`)
+
+El Excel `Resumen incidencias_ Respuestas EC.xlsx` (proyecto 22_ET_217 Tigray, Xunta) recoge las incidencias del
+revisor externo y la respuesta de Entreculturas (EC); muchas son falsos positivos del revisor. Sirve de verdad de
+referencia para medir las comprobaciones.
+
+```bash
+cd backend
+python eval/convertir_tigray.py            # DATA_DIR/.../Resumen incidencias_ Respuestas EC.xlsx -> eval/tigray_ground_truth.csv
+python eval/evaluar_tigray.py --proyecto ID            # incidencias nuestras desde la BD
+python eval/evaluar_tigray.py --hallazgos nuestras.csv # o desde un CSV order_no,rule_code
+```
+
+- `tigray_ground_truth.csv` tiene una fila por incidencia: partida, nº de orden, factura, fecha, texto del revisor,
+  comentario de EC, `categoria` (nuestros códigos de regla, `|` si son varios, `SIN_REGLA` si no tenemos regla) y
+  `veredicto` (`real` si EC la acepta o la corrige, `falso_positivo` si EC demuestra que estaba bien,
+  `indeterminado` si la respuesta no lo aclara). La clasificación es por palabras clave y prudente: revisa a mano las
+  `indeterminado`. **Contiene datos reales: está en `.gitignore`, no se sube.**
+- `evaluar_tigray.py` da, por categoría, cuántas incidencias reales detectamos (recall) y cuántos falsos positivos del
+  revisor evitamos (no levantamos la misma regla sobre ese gasto). Las `SIN_REGLA` se listan pero no cuentan y las
+  `indeterminado` quedan fuera de los porcentajes.
+- Resultado de la conversión (14/11/2026 · 238 incidencias): 131 reales, 73 falsos positivos del revisor y 34
+  indeterminadas; por categoría: 62 expediente incompleto, 60 fecha (13 también importe), 22 importe, 56 sin regla
+  nuestra (reparto del importe entre trabajadores, descripción de la factura).
+- **Limitación:** la carpeta de Tigray solo trae este Excel, sin el listado de gastos ni los PDF, así que **todavía no
+  hay medición de nuestras detecciones**. Qué falta, en [docs/integracion_pendiente.md](docs/integracion_pendiente.md).
+
 ## Presupuesto y topes (`pipeline/budget.py`)
 
 Proceso 2a: presupuesto aprobado frente a ejecutado por partida y topes del donante. Todo el cálculo

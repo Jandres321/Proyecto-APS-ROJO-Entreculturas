@@ -37,3 +37,22 @@ La regla ya está en `rules/xunta.yaml` y `rules/aecid.yaml` y en `pipeline/chec
   donante).
 - Referencia normativa de Xunta: el YAML cita `Rules.xlsx` y la Orden AH 2024 de forma genérica;
   falta confirmar el artículo exacto de la convocatoria (no hay copia en el repo).
+
+## 3. Evaluación con Tigray: qué falta para medir
+
+`backend/eval/` ya convierte el Excel del revisor y calcula las métricas, pero el proyecto Tigray
+**no se puede ejecutar por el pipeline** con lo que hay en `DATA_DIR`:
+
+- La carpeta `22_ET_217 Crisis Tigray Addis - Xunta de Galicia/` solo contiene
+  `Documentos e informe con incidencias/Resumen incidencias_ Respuestas EC.xlsx`: **no hay informe
+  económico (listado de gastos) ni los PDF**, así que el adaptador Xunta no tiene qué ingerir y no
+  hay documentos que leer. Hace falta ese informe y los justificantes.
+- El Excel no es un listado de gastos: no se ha forzado en el adaptador Xunta. Sus columnas de datos
+  (partida, nº de orden, fecha, factura, emisor, importes) no tienen cabecera y solo hay gastos con
+  incidencia.
+- Una vez ingerido el proyecto (otra persona: modelo de proyectos/API), basta
+  `python eval/evaluar_tigray.py --proyecto ID`. El cruce con la verdad se hace por **nº de orden**
+  (`Expense.order_no`); hay que comprobar que coincide con el del Excel (aquí es numérico: 1-128).
+- Mejoras: revisar a mano las incidencias `indeterminado` (34 de 238) y las `SIN_REGLA` (56) para
+  decidir si merece la pena una regla nueva (reparto del importe entre trabajadores, descripción de
+  la factura distinta).
