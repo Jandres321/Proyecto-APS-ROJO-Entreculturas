@@ -2,6 +2,10 @@
 data (database tests are rolled back and skipped without PostgreSQL)."""
 
 import io
+import json
+import re
+import shutil
+import subprocess
 import zipfile
 from decimal import Decimal
 from pathlib import Path
@@ -462,3 +466,113 @@ def test_a_failed_run_is_reported_not_hidden(db_session, project, api, sync_jobs
     failed = api.get("/api/projects/web/run").json()
     assert failed["state"] == "error"
     assert "Faltan datos" in failed["message"] and "DATA_DIR" in failed["message"]
+
+
+# --- the page's modules (web/js) and its example data (?mock=1) ---
+
+WEB = Path(__file__).resolve().parents[1] / "app" / "web"
+JS_FILES = sorted((WEB / "js").glob("*.js"))
+# U+1F000-U+1FAFF pictographs, U+2600-U+27BF symbols and dingbats, U+2B00-U+2BFF arrows/stars
+# and the emoji variation selector.
+EMOJI = re.compile("[\U0001f000-\U0001faff\u2600-\u27bf\u2b00-\u2bff\ufe0f]")
+SVG_NAMESPACE = "http://www.w3.org/2000/svg"  # an identifier inside the drawn example page
+
+
+def test_the_page_loads_its_modules_from_the_server(client):
+    html = client.get("/").text
+    assert '<script type="module" src="/js/app.js"></script>' in html
+    assert {p.name for p in JS_FILES} >= {"app.js", "api.js", "mock.js", "review.js", "viewer.js"}
+    for path in JS_FILES:
+        served = client.get(f"/js/{path.name}")
+        assert served.status_code == 200, path.name
+        assert served.headers["content-type"].startswith("text/javascript")
+    for name in ("nada.js", "..%2Fmain.py", "index.html"):
+        assert client.get(f"/js/{name}").status_code == 404
+
+
+def test_the_modules_load_nothing_from_outside_and_store_nothing():
+    for path in [WEB / "index.html", *JS_FILES]:
+        text = path.read_text(encoding="utf-8").replace(SVG_NAMESPACE, "")
+        assert "http://" not in text and "https://" not in text, path.name
+        for storage in ("localStorage", "sessionStorage", "indexedDB", "document.cookie"):
+            assert storage not in text, f"{storage} in {path.name}"
+
+
+def test_the_page_has_no_emojis_and_no_positive_decision_in_bulk():
+    for path in [WEB / "index.html", *JS_FILES]:
+        text = path.read_text(encoding="utf-8")
+        assert not EMOJI.search(text), f"emoji in {path.name}: {EMOJI.search(text).group()!r}"
+        # the verdict comes from the server; nothing marks several expenses as fine at once
+        for gone in ("verdictOf", "Dar por bueno", "bulk("):
+            assert gone not in text, f"{gone} in {path.name}"
+
+
+def _node() -> str:
+    node = shutil.which("node")
+    if node is None:
+        pytest.skip("Node.js no está instalado")
+    return node
+
+
+def test_every_module_is_valid_javascript():
+    node = _node()
+    for path in JS_FILES:
+        result = subprocess.run([node, "--check", str(path)], capture_output=True, text=True)
+        assert result.returncode == 0, f"{path.name}: {result.stderr}"
+
+
+MOCK_PROBE = """
+globalThis.location = { search: "?mock=1" };
+const mock = await import(process.argv[2]);  // the URL of mock.js
+const call = async (path, options) => {
+  const r = await mock.respond(path, options);
+  return { status: r.status, body: r.status === 204 ? null : await r.json() };
+};
+const json = (method, body) => ({ method, headers: { "Content-Type": "application/json" },
+                                  body: JSON.stringify(body) });
+const projects = await call("/projects");
+const review = await call(`/projects/${projects.body[0].key}/review`);
+const blocking = review.body.expenses.find((e) => e.reasons.some((r) => r.blocking));
+const refused = await call(`/expenses/${blocking.id}/decision`,
+                           json("PATCH", { status: "correct" }));
+const pending = review.body.expenses.find((e) => e.verdict.code === "review");
+const decided = await call(`/expenses/${pending.id}/decision`,
+                           json("PATCH", { status: "real_issue", note: "Nota" }));
+const page = await mock.respond(`/documents/${pending.documents[0]?.id ?? 0}/page/1.png?dpi=150`);
+console.log(JSON.stringify({ projects, review, refused, decided,
+                             page: { status: page.status, pages: page.headers.get("X-Pages") } }));
+"""
+
+
+def test_the_example_data_follows_the_api_contract(tmp_path):
+    """The shape the page expects from GET /review and PATCH /decision (docs/pendiente_web.md)."""
+    node = _node()
+    probe = tmp_path / "probe.mjs"
+    probe.write_text(MOCK_PROBE, encoding="utf-8")
+    mock_url = (WEB / "js" / "mock.js").as_uri()
+    result = subprocess.run(
+        [node, str(probe), mock_url], capture_output=True, text=True, encoding="utf-8"
+    )
+    assert result.returncode == 0, result.stderr
+    out = json.loads(result.stdout)
+
+    review = out["review"]["body"]
+    assert set(review["counts"]) == {"pending", "reviewed", "ok", "na"}
+    assert sum(review["counts"].values()) == len(review["expenses"])
+    for e in review["expenses"]:
+        assert e["verdict"]["code"] in {"ok", "review", "na"}
+        assert e["verdict"]["label"] in {"Bien", "Necesita revisión", "No aplica"}
+        assert all(set(r) == {"code", "label", "blocking"} for r in e["reasons"])
+        assert e["decision"]["status"] in {"pending", "correct", "real_issue"}
+        assert {"status", "note", "decided_at"} <= set(e["decision"])
+        assert all(set(c) == {"field", "label", "listed", "read", "match"} for c in e["compare"])
+        # as in app/verdict.py: there are reasons exactly when the expense needs review
+        assert (e["verdict"]["code"] == "review") == bool(e["reasons"])
+    assert {e["verdict"]["code"] for e in review["expenses"]} == {"ok", "review", "na"}
+
+    # "Correcto" needs a note when a reason is blocking; a decision returns the expense
+    assert out["refused"]["status"] == 422 and "bloqueante" in out["refused"]["body"]["detail"]
+    assert out["decided"]["status"] == 200
+    assert out["decided"]["body"]["decision"]["status"] == "real_issue"
+    assert out["decided"]["body"]["decision"]["note"] == "Nota"
+    assert out["page"]["status"] == 200 and int(out["page"]["pages"]) >= 1
