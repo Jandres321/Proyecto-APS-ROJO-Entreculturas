@@ -19,7 +19,7 @@ from app.pipeline.classify import LLM_SCHEMA  # noqa: E402
 class FakeAsyncAnthropic:
     """Stands in for `anthropic.AsyncAnthropic`: records requests and returns canned replies."""
 
-    def __init__(self, api_key=None):
+    def __init__(self, api_key=None, **options):
         self.api_key = api_key
         self.requests: list[dict] = []
         self.reply = {"text": "{}", "stop_reason": "end_turn"}

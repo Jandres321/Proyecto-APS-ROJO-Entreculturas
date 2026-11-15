@@ -18,6 +18,8 @@ DEFAULT_MODEL = "claude-haiku-5-5"  # cheapest model: the API budget is small
 # JSON is never cut, and keep the effort low (these are small extraction tasks).
 MAX_TOKENS = 16000
 EFFORT = "low"
+CALL_TIMEOUT_SECONDS = 120.0
+MAX_RETRIES = 2
 
 
 def strict_schema(schema: JsonSchema) -> JsonSchema:
@@ -45,7 +47,12 @@ class AnthropicClient(LLMClient):
         from anthropic import AsyncAnthropic  # optional dependency (extra "llm")
 
         # Without an explicit key the SDK takes it from the environment (ANTHROPIC_API_KEY).
-        self._client = AsyncAnthropic(api_key=api_key or None)
+        # The SDK's default timeout is 10 minutes per attempt: far too long for one page. A call
+        # that does not answer fails after CALL_TIMEOUT_SECONDS (the page then keeps its OCR
+        # reading) instead of holding the whole analysis.
+        self._client = AsyncAnthropic(
+            api_key=api_key or None, timeout=CALL_TIMEOUT_SECONDS, max_retries=MAX_RETRIES
+        )
 
     async def _call(self, content: list[dict[str, Any]], schema: JsonSchema) -> dict[str, Any]:
         async with self.semaphore:

@@ -145,8 +145,10 @@ async def _enrich_one(
     if cached is not None:
         return cached
     png = await asyncio.to_thread(pg.render, path, page.n, 150, page.rotation)
-    async with client.semaphore:
-        data = await client.extract([png], SCHEMA, PROMPT)
+    # The client bounds its own concurrent calls (LLMClient.semaphore). Do NOT take that
+    # semaphore here as well: holding one permit while the client waits for another deadlocks
+    # the whole run as soon as there are more pages than permits.
+    data = await client.extract([png], SCHEMA, PROMPT)
     enriched = dataclasses.replace(page, backend=backend, llm_fields=data or None)
     pg._save_cache(cache, enriched)
     return enriched
