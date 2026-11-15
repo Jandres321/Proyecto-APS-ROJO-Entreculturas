@@ -24,6 +24,7 @@ from app.pipeline.budget import BudgetAnalysis, run_budget
 from app.pipeline.checks import run_checks
 from app.pipeline.classify import flag_doubtful_imputations, suggest_partidas
 from app.pipeline.ingest import ingest_project
+from app.pipeline.listing import run_listing_checks
 from app.pipeline.match import register_documents
 from app.pipeline.match_content import ContentMatchSummary, match_by_segments
 from app.rules import sync_rules
@@ -114,6 +115,7 @@ def run_pipeline(
     notify("checks")
     sync_rules(session, project.donor)
     summary.check_findings = len(run_checks(session, project.id))
+    summary.check_findings += len(run_listing_checks(session, project.id))
 
     notify("partidas")
     asyncio.run(suggest_partidas(session, project.id))  # keyword layer only (no network)

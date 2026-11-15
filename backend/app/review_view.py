@@ -64,6 +64,10 @@ RULE_LABELS_ES = {
     "BUDGET_DEVIATION": "Desviación respecto al presupuesto",
     "EXECUTED_REPORT_MISMATCH": "Ejecutado del informe no cuadra con el listado",
     "PARTIDA_MISMATCH": "Gasto posiblemente imputado en otra partida",
+    "FX_RATE_MISMATCH": "El importe en euros no cuadra con el tipo de cambio",
+    "DONOR_SHARE_MISMATCH": "Lo imputado al donante no cuadra con el porcentaje",
+    "PARTIDA_NOT_IN_BUDGET": "Partida que no está en el presupuesto",
+    "THREE_QUOTES_REQUIRED": "Deben constar tres ofertas",
 }
 
 METHOD_LABELS_ES = {

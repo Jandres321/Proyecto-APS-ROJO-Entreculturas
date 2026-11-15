@@ -257,6 +257,8 @@ def test_document_statuses_cover_every_case(db_session, project):
         document_statuses,
     )
 
+    # a donor that does not justify cofinanced expenses (Xunta does: see test_listing.py)
+    project.match_config = {**(project.match_config or {}), "cofinanced_needs_document": False}
     doc = add_document(db_session, project)
     cases = {}
     for name, fields in {

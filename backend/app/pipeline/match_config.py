@@ -103,7 +103,9 @@ _BASE: MatchConfig = {
 
 # Generic default per donor: what any project of that donor gets unless it overrides a key.
 DONOR_DEFAULTS: dict[Donor, MatchConfig] = {
-    Donor.XUNTA: {**_BASE},
+    # Xunta justifies the whole project, also what other funders pay: an expense with nothing
+    # imputed to the donor still needs its receipt.
+    Donor.XUNTA: {**_BASE, "cofinanced_needs_document": True},
     Donor.AECID: {**_BASE},
 }
 
@@ -131,12 +133,15 @@ def expense_kind(expense: Any, config: MatchConfig) -> str:
 
     - ``indirecto``: its partida is one of the config's ``no_document_partidas``.
     - ``cofinanciacion``: nothing is imputed to the donor (donor amount or imputed % is zero),
-      so its receipt belongs to another funder's justification.
+      so its receipt belongs to another funder's justification. Not for donors that justify the
+      whole project (``cofinanced_needs_document``, Xunta).
     - ``normal``: a receipt is expected.
     Works on ORM ``Expense`` rows and on any object with the same attribute names.
     """
     if getattr(expense, "partida_code", None) in set(config.get("no_document_partidas", ())):
         return KIND_INDIRECT
+    if config.get("cofinanced_needs_document"):
+        return KIND_NORMAL
     extra = getattr(expense, "extra", None) or {}
     donor_amount = getattr(expense, "amount_donor", None)
     if (donor_amount is not None and donor_amount == 0) or extra.get("pct_imputed") == 0:

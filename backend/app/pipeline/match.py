@@ -150,6 +150,7 @@ class RegisterResult:
     ignored: list[str] = field(default_factory=list)
     errors: list[str] = field(default_factory=list)
     unchanged: int = 0  # already registered (same path and hash)
+    removed: list[str] = field(default_factory=list)  # registered before, no longer in the folder
 
 
 def register_documents(
@@ -191,6 +192,15 @@ def register_documents(
         else:
             logger.warning("Duplicate document %s (same content as %s)", item.path, kept.path)
             result.duplicates.append(DuplicateWarning(item.path, item.filename, kept))
+    # A file that was registered and is no longer in the folder (deleted, replaced, renamed) must
+    # not keep counting as a receipt: forget it with its links (its expenses go back to review).
+    present = {item.sha256 for item in scan.documents}
+    for sha, document in list(known.items()):
+        if sha in present or (not include_zips and ZIP_MEMBER_SEPARATOR in document.path):
+            continue
+        logger.warning("Document %s is no longer in the folder: removed", document.path)
+        result.removed.append(document.path)
+        session.delete(document)
     session.flush()
 
     findings = [

@@ -215,3 +215,14 @@ def test_orphan_documents_raise_doc_orphan(db_session, tmp_path):
     findings = list(db_session.scalars(select(Finding).where(Finding.rule_code == "DOC_ORPHAN")))
     assert len(findings) == 2 and all(f.severity == Severity.MEDIUM for f in findings)
     assert all(f.document_id and f.expense_id is None for f in findings)
+
+
+def test_a_document_that_disappears_stops_counting(db_session, project_with_expenses, folder):
+    register_documents(db_session, project_with_expenses.id, folder)
+    (folder / "3. Escaneo.pdf").unlink()
+    result = register_documents(db_session, project_with_expenses.id, folder)
+    assert [p.split("/")[-1] for p in result.removed] == ["3. Escaneo.pdf"]
+    names = db_session.scalars(
+        select(Document.filename).where(Document.project_id == project_with_expenses.id)
+    ).all()
+    assert "3. Escaneo.pdf" not in names and len(names) == 5
