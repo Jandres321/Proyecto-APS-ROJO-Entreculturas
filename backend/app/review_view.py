@@ -17,7 +17,7 @@ from app.enums import (
     FINDING_STATUS_LABELS_ES,
     SEVERITY_LABELS_ES,
     FindingStatus,
-    Severity,
+    ReviewDecision,
 )
 from app.models import (
     Document,
@@ -30,15 +30,16 @@ from app.models import (
     Segmento,
 )
 from app.pipeline.budget import TRAFFIC_LABELS_ES, compute_execution
-from app.review import (
-    BY_CONTENT,
-    MANUAL,
-    MISSING,
-    VERIFIED,
-    DocumentStatus,
-    document_statuses,
-    list_findings,
-    locate,
+from app.review import document_statuses, list_findings, locate
+from app.verdict import (
+    NOT_APPLICABLE,
+    OK,
+    REVIEW,
+    compare_rows,
+    decision_view,
+    fingerprint,
+    reasons_for,
+    verdict_for,
 )
 
 RULE_LABELS_ES = {
@@ -71,14 +72,6 @@ METHOD_LABELS_ES = {
     "manual": "vinculado a mano",
 }
 
-# Verdict of an expense (what the reviewer sees at a glance), worst first.
-VERDICT_CRITICAL = "critical"  # an open finding of high severity
-VERDICT_REVIEW = "review"  # open findings, none high
-VERDICT_CONFIRMED = "confirmed"  # nothing open, but the reviewer accepted a finding as real
-VERDICT_NO_DOC = "nodoc"  # no document and nothing left open
-VERDICT_NOT_APPLICABLE = "na"  # needs no document / not in the sample
-VERDICT_OK = "ok"  # a document and no open or accepted finding
-
 
 def _plain(value: Any) -> Any:
     """Decimal / date -> JSON-able."""
@@ -87,26 +80,6 @@ def _plain(value: Any) -> Any:
     if isinstance(value, (dt.date, dt.datetime)):
         return value.isoformat()
     return value
-
-
-def expense_verdict(status: DocumentStatus, findings: list[Finding]) -> dict[str, Any]:
-    """Verdict from the real state of an expense: its document status and its findings."""
-    open_ = [f for f in findings if f.status == FindingStatus.OPEN]
-    accepted = [f for f in findings if f.status == FindingStatus.ACCEPTED]
-    if open_:
-        high = any(f.severity == Severity.HIGH for f in open_)
-        n = len(open_)
-        label = f"Revisar · {n} incidencia{'s' if n != 1 else ''}"
-        return {"code": VERDICT_CRITICAL if high else VERDICT_REVIEW, "label": label}
-    if accepted:
-        n = len(accepted)
-        label = f"{n} incidencia{'s' if n != 1 else ''} confirmada{'s' if n != 1 else ''}"
-        return {"code": VERDICT_CONFIRMED, "label": label}
-    if status.status == MISSING:
-        return {"code": VERDICT_NO_DOC, "label": "Sin justificante"}
-    if status.status in (VERIFIED, BY_CONTENT, MANUAL) or status.confidence is not None:
-        return {"code": VERDICT_OK, "label": "Sin incidencias"}
-    return {"code": VERDICT_NOT_APPLICABLE, "label": status.label}
 
 
 def finding_view(session: Session, finding: Finding) -> dict[str, Any]:
@@ -194,10 +167,22 @@ def project_review(session: Session, project: Project) -> dict[str, Any]:
     data_dir_docs = {doc_id: _openable(document) for doc_id, document in documents.items()}
     order = {"high": 0, "medium": 1, "low": 2, None: 3}
     out_expenses = []
+    totals = {OK: 0, REVIEW: 0, NOT_APPLICABLE: 0, "pending": 0, "reviewed": 0}
     for e in expenses:
         status = statuses[e.id]
         mine = by_expense.get(e.id, [])
         extra = e.extra or {}
+        read = [s for _, s in segments.get(e.id, [])]
+        reasons = reasons_for(status, read, mine, RULE_LABELS_ES)
+        verdict = verdict_for(status, reasons)
+        compare = compare_rows(e, read)
+        print_ = fingerprint(
+            reasons, mine, compare, [link.document_id for link in links.get(e.id, [])]
+        )
+        decision = decision_view(e, print_)
+        totals[verdict["code"]] += 1
+        if verdict["code"] == REVIEW:
+            totals["pending" if decision["status"] == ReviewDecision.PENDING else "reviewed"] += 1
         out_expenses.append(
             {
                 "id": e.id,
@@ -219,7 +204,11 @@ def project_review(session: Session, project: Project) -> dict[str, Any]:
                 "doc_status": status.status,
                 "doc_status_label": status.label,
                 "confidence_label": status.confidence_label,
-                "verdict": expense_verdict(status, mine),
+                "verdict": verdict,
+                "reasons": [r.as_dict() for r in reasons],
+                "decision": decision,
+                "compare": compare,
+                "fingerprint": print_,
                 "documents": [
                     {
                         "id": link.document_id,
@@ -259,6 +248,13 @@ def project_review(session: Session, project: Project) -> dict[str, Any]:
             "findings": counts,
         },
         "expenses": out_expenses,
+        # Progress of the review: "Bien", "No aplica", and the ones to review split by decision.
+        "counts": {
+            "pending": totals["pending"],
+            "reviewed": totals["reviewed"],
+            "ok": totals[OK],
+            "na": totals[NOT_APPLICABLE],
+        },
         "general_findings": general,
         "rule_labels": RULE_LABELS_ES,
     }

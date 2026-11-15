@@ -11,7 +11,7 @@ from fastapi.responses import FileResponse
 from sqlalchemy.exc import OperationalError
 
 from app import __version__, db
-from app.api import documents, findings, projects
+from app.api import documents, expenses, findings, projects
 from app.api import settings as settings_routes
 from app.config import get_settings
 from app.samples import ensure_sample_projects
@@ -60,6 +60,7 @@ app.include_router(settings_routes.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
 app.include_router(documents.router, prefix="/api")
 app.include_router(findings.router, prefix="/api")
+app.include_router(expenses.router, prefix="/api")
 
 WEB_APP = Path(__file__).parent / "web" / "index.html"
 

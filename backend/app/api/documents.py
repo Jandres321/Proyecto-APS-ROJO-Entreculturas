@@ -27,8 +27,11 @@ def _pdf(session: SessionDep, document_id: int) -> Path:
 
 
 @router.get("/{document_id}/page/{page}.png")
-def document_page(document_id: int, page: int, session: SessionDep, rotation: int = 0) -> Response:
-    """One page of a registered PDF as PNG (many scans come upside down: `rotation` turns it)."""
+def document_page(
+    document_id: int, page: int, session: SessionDep, rotation: int = 0, dpi: int = 110
+) -> Response:
+    """One page of a registered PDF as PNG (many scans come upside down: `rotation` turns it;
+    `dpi` from 72 to 300 zooms in, for handwriting)."""
     import pymupdf
 
     path = _pdf(session, document_id)
@@ -38,7 +41,7 @@ def document_page(document_id: int, page: int, session: SessionDep, rotation: in
             selected = pdf[min(max(page, 1), pages) - 1]
             if rotation % 360:
                 selected.set_rotation((selected.rotation + rotation) % 360)
-            image = selected.get_pixmap(dpi=110).tobytes("png")
+            image = selected.get_pixmap(dpi=min(max(dpi, 72), 300)).tobytes("png")
     except Exception as error:  # damaged or protected PDF
         raise HTTPException(
             status.HTTP_422_UNPROCESSABLE_ENTITY, f"No se ha podido abrir el PDF: {error}"

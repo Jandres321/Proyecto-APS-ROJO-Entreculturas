@@ -34,6 +34,21 @@ class LlmMode(StrEnum):
     ALL = "todas"
 
 
+class ReviewDecision(StrEnum):
+    """The reviewer's decision on an expense that needs review."""
+
+    PENDING = "pending"
+    CORRECT = "correct"
+    REAL_ISSUE = "real_issue"
+
+
+REVIEW_DECISION_LABELS_ES = {
+    ReviewDecision.PENDING: "Pendiente",
+    ReviewDecision.CORRECT: "Correcto",
+    ReviewDecision.REAL_ISSUE: "Incidencia real",
+}
+
+
 class JobState(StrEnum):
     RUNNING = "running"
     DONE = "done"

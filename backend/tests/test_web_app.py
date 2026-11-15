@@ -5,7 +5,6 @@ import io
 import zipfile
 from decimal import Decimal
 from pathlib import Path
-from types import SimpleNamespace
 
 import pytest
 
@@ -31,8 +30,7 @@ from app.models import (
 )
 from app.pipeline.match_content import ContentMatchSummary
 from app.pipeline.run import RunSummary
-from app.review import MISSING, NOT_REQUIRED_INDIRECT, VERIFIED, DocumentStatus
-from app.review_view import expense_verdict, project_review
+from app.review_view import project_review
 
 D = Decimal
 # --- the page ---
@@ -49,28 +47,7 @@ def test_the_page_is_served_and_carries_no_data_or_external_resources(client):
     assert "localStorage" not in html and "sk-ant" not in html
 
 
-# --- verdict (pure) ---
-
-
-def finding(status=FindingStatus.OPEN, severity=Severity.MEDIUM):
-    return SimpleNamespace(status=status, severity=severity)
-
-
-def test_verdict_comes_from_the_document_status_and_the_findings():
-    linked = DocumentStatus(VERIFIED, Confidence.HIGH)
-    assert expense_verdict(linked, [])["code"] == "ok"
-    assert expense_verdict(linked, [finding()]) == {
-        "code": "review",
-        "label": "Revisar · 1 incidencia",
-    }
-    two = [finding(), finding(severity=Severity.HIGH)]
-    assert expense_verdict(linked, two) == {"code": "critical", "label": "Revisar · 2 incidencias"}
-    # nothing open: an accepted finding is a confirmed problem, a false positive is not
-    assert expense_verdict(linked, [finding(FindingStatus.ACCEPTED)])["code"] == "confirmed"
-    assert expense_verdict(linked, [finding(FindingStatus.FALSE_POSITIVE)])["code"] == "ok"
-    assert expense_verdict(DocumentStatus(MISSING), [])["code"] == "nodoc"
-    indirect = expense_verdict(DocumentStatus(NOT_REQUIRED_INDIRECT), [])
-    assert indirect == {"code": "na", "label": "No requiere justificante (coste indirecto)"}
+# The verdict itself is tested in test_verdict.py.
 
 
 # --- expense-centred view (database) ---
@@ -159,7 +136,15 @@ def test_review_groups_documents_readings_and_findings_by_expense(db_session, pr
         "F-42",
         "Transferencia 10/05/2024",
     )
-    assert first["verdict"] == {"code": "review", "label": "Revisar · 1 incidencia"}
+    assert first["verdict"] == {"code": "review", "label": "Necesita revisión"}
+    # the segment has an amount but no date, issuer or invoice no.; and the open finding
+    assert [r["code"] for r in first["reasons"]] == [
+        "NOT_READ_DATE",
+        "NOT_READ_ISSUER",
+        "DONOR_STAMP_MISSING",
+    ]
+    assert first["decision"]["status"] == "pending"
+    assert view["counts"] == {"pending": 2, "reviewed": 0, "ok": 0, "na": 0}
     (linked,) = first["documents"]
     assert linked["filename"] == "1. Factura.pdf" and linked["verified"] is True
     assert linked["method_label"] == "propuesto por el nombre del archivo"
@@ -176,7 +161,12 @@ def test_review_groups_documents_readings_and_findings_by_expense(db_session, pr
     assert shown["document_id"] == doc.id and shown["document_openable"] is False  # no DATA_DIR
 
     assert second["id"] == without.id and second["documents"] == [] and second["segments"] == []
-    assert second["doc_status"] == "missing" and second["verdict"]["code"] == "nodoc"
+    assert second["doc_status"] == "missing" and second["verdict"]["code"] == "review"
+    assert second["reasons"][0] == {
+        "code": "DOC_MISSING",
+        "label": "Sin justificante",
+        "blocking": True,
+    }
     assert [f["id"] for f in view["general_findings"]] == [general.id]
 
 
@@ -207,10 +197,11 @@ def test_the_report_has_one_row_per_expense_with_what_was_really_read(
     first, second = (
         dict(zip(header, [c.value for c in row], strict=True)) for row in sheet.iter_rows(min_row=2)
     )
+    # (transitional columns: the workbook is being redone for the new verdict)
     assert (first["Nº orden"], first["Semáforo"], first["Veredicto"]) == (
         "1",
-        "rojo",
-        "1 incidencia confirmada",
+        "amarillo",
+        "Necesita revisión",
     )
     assert first["Documentos vinculados"] == "1. Factura.pdf"
     assert first["Verificado por contenido"] == "sí"
@@ -224,14 +215,14 @@ def test_the_report_has_one_row_per_expense_with_what_was_really_read(
 
     assert (second["Nº orden"], second["Semáforo"], second["Veredicto"]) == (
         "2",
-        "gris",
-        "Sin justificante",
+        "amarillo",
+        "Necesita revisión",
     )
     # nothing was read for an expense without document: the cells stay empty, not "no"
     assert second["Leído: sello del donante"] is None and second["Documentos vinculados"] is None
 
     summary = {row[0].value: row[1].value for row in book["Resumen"].iter_rows(min_row=2)}
-    assert summary["Gastos del informe"] == 2 and summary["Gastos sin justificante"] == 1
+    assert summary["Gastos del informe"] == 2 and summary["Gastos que necesitan revisión"] == 2
     assert summary["Incidencias aceptadas (reales)"] == 1 and summary["Incidencias abiertas"] == 1
     assert summary["   · Desviación respecto al presupuesto"] == 1
 

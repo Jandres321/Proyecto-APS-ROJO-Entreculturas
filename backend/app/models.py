@@ -30,6 +30,7 @@ from app.enums import (
     LlmMode,
     MatchMethod,
     ProjectStatus,
+    ReviewDecision,
     RuleKind,
     Severity,
     SourceType,
@@ -192,6 +193,14 @@ class Expense(Base):
     suggested_partida: Mapped[str | None] = mapped_column(String(50))
     suggested_confidence: Mapped[float | None] = mapped_column(Float)
     suggested_reason: Mapped[str | None] = mapped_column(Text)
+    # The reviewer's decision on the expense as a whole. `review_fingerprint` is what the reviewer
+    # saw when deciding (reasons, findings, values read): if it changes, the decision is stale.
+    review_status: Mapped[ReviewDecision] = mapped_column(
+        enum_type(ReviewDecision), default=ReviewDecision.PENDING, server_default="pending"
+    )
+    review_note: Mapped[str | None] = mapped_column(Text)
+    reviewed_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
+    review_fingerprint: Mapped[str | None] = mapped_column(String(64))
 
     project: Mapped[Project] = relationship(back_populates="expenses")
     document_links: Mapped[list["ExpenseDocument"]] = relationship(

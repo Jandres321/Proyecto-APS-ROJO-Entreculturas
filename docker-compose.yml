@@ -6,7 +6,8 @@ services:
       POSTGRES_PASSWORD: revisor
       POSTGRES_DB: revisor
     ports:
-      - "5432:5432"
+      # Only reachable from this computer: the database holds confidential data.
+      - "127.0.0.1:5432:5432"
     volumes:
       - pgdata:/var/lib/postgresql/data
     healthcheck:
@@ -28,7 +29,8 @@ services:
       GOOGLE_CREDENTIALS: /secrets/credentials.json
       GOOGLE_TOKEN: /secrets/token.json
     ports:
-      - "8000:8000"
+      # Only reachable from this computer: the API serves the original PDFs (payslips included).
+      - "127.0.0.1:8000:8000"
     volumes:
       - ./backend:/app
       # Confidential dataset, read-only. Set DATA_DIR in .env (host path).

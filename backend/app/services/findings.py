@@ -24,8 +24,10 @@ def sync_findings(
 ) -> None:
     """Replace the OPEN findings of `rule_codes` with `new`, keeping reviewer decisions.
 
-    A finding for which the reviewer already decided (accepted / false positive) on the same
-    expense + document (+ subject) is not created again. Does not commit.
+    A decision (accepted / false positive) on the same expense + document (+ subject) is kept
+    while the finding says the same thing. If the new run finds something different (another
+    amount, another date: a different message), the decision no longer applies and the finding is
+    reopened with the new message; the reviewer's note is kept for context. Does not commit.
     """
     session.execute(
         delete(Finding).where(
@@ -35,7 +37,7 @@ def sync_findings(
         )
     )
     reviewed = {
-        finding_key(f.rule_code, f.expense_id, f.document_id, f.evidence)
+        finding_key(f.rule_code, f.expense_id, f.document_id, f.evidence): f
         for f in session.scalars(
             select(Finding).where(
                 Finding.project_id == project_id, Finding.rule_code.in_(rule_codes)
@@ -46,6 +48,11 @@ def sync_findings(
         key = finding_key(
             finding.rule_code, finding.expense_id, finding.document_id, finding.evidence
         )
-        if key in reviewed:
-            continue
-        session.add(Finding(project_id=project_id, **finding.model_dump()))
+        decided = reviewed.get(key)
+        if decided is None:
+            session.add(Finding(project_id=project_id, **finding.model_dump()))
+        elif decided.message != finding.message:
+            decided.status = FindingStatus.OPEN
+            decided.severity = finding.severity
+            decided.message = finding.message
+            decided.evidence = finding.evidence

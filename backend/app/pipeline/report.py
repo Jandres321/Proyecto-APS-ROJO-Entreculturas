@@ -19,20 +19,12 @@ from app.pipeline.budget import compute_execution
 from app.pipeline.export import budget_tables, findings_table, format_sheet
 from app.review_view import project_review
 
-VERDICT_TRAFFIC = {
-    "critical": "rojo",
-    "confirmed": "rojo",
-    "review": "amarillo",
-    "ok": "verde",
-    "nodoc": "gris",
-    "na": "gris",
-}
+# Transitional: the workbook is being redone for the new verdict (Bien / Necesita revisión /
+# No aplica, reasons and the reviewer's decision).
+VERDICT_TRAFFIC = {"review": "amarillo", "ok": "verde", "na": "gris"}
 VERDICT_SUMMARY_ES = {
-    "critical": "Gastos que hay que revisar (alguna incidencia grave abierta)",
-    "review": "Gastos que hay que revisar (incidencias abiertas, ninguna grave)",
-    "confirmed": "Gastos con incidencias confirmadas por el revisor",
-    "nodoc": "Gastos sin justificante",
-    "ok": "Gastos con justificante y sin incidencias",
+    "review": "Gastos que necesitan revisión",
+    "ok": "Gastos comprobados y sin nada pendiente (Bien)",
     "na": "Gastos que no requieren justificante o no están en la muestra",
 }
 WRAPPED = ("Detalle de las incidencias", "Motivo del vínculo", "Documentos vinculados", "Concepto")
