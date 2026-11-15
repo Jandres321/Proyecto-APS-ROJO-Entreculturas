@@ -8,7 +8,7 @@
 #   - Reto Entreculturas (proceso 1): incidencias frecuentes y soportes complementarios.
 #
 # Formato y significado de cada campo: ver app/rules.py. Las comprobaciones que implementan estas
-# reglas están en app/pipeline/checks.py; aquí solo viven los umbrales y requisitos.
+# reglas están en app/pipeline/checks/; aquí solo viven los umbrales y requisitos.
 
 donor: xunta
 

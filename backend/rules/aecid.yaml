@@ -9,7 +9,7 @@
 # el catálogo de incidencias frecuentes.
 #
 # Formato y significado de cada campo: ver app/rules.py. Las comprobaciones que implementan estas
-# reglas están en app/pipeline/checks.py; aquí solo viven los umbrales y requisitos.
+# reglas están en app/pipeline/checks/; aquí solo viven los umbrales y requisitos.
 
 donor: aecid
 

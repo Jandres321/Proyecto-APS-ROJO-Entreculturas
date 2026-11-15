@@ -5,7 +5,7 @@ Usage (from backend/, needs the migrated PostgreSQL and DATA_DIR):
 
 For each project: ingest the donor report, register the PDFs, read them (cached OCR), match them
 by content, load `rules/<donor>.yaml` into the `rule` table and run the checks of
-app/pipeline/checks.py. Everything is rolled back at the end unless --persist is given.
+app/pipeline/checks/. Everything is rolled back at the end unless --persist is given.
 """
 
 import argparse

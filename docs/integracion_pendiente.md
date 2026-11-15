@@ -27,7 +27,7 @@ Implementado en `app/lectura/` (`LlmReadOptions`, `process_pdfs(..., llm=)`,
 
 ## 2. Periodo del proyecto (`DATE_OUT_OF_PERIOD`)
 
-La regla ya está en `rules/xunta.yaml` y `rules/aecid.yaml` y en `pipeline/checks.py`
+La regla ya está en `rules/xunta.yaml` y `rules/aecid.yaml` y en `pipeline/checks/`
 (`project_period`). Lee el periodo con `getattr(project, "start_date", None)` /
 `getattr(project, "end_date", None)` (acepta `date` o `datetime`; basta uno de los dos):
 

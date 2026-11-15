@@ -105,7 +105,7 @@ proyecto se cruza solo por contenido** (Paraguay: sus nombres son solo números 
 
 Cada vínculo (`expense_document`) guarda `method` (`filename` si lo propuso el nombre, `content` si lo halló el
 contenido), `confidence`, `verified` y un **motivo en español**; los segmentos que lo respaldan se guardan en
-`expense_segment` para que `checks.py` pueda comprobar el importe, la fecha, el sello y el pago sobre ellos. Si
+`expense_segment` para que `pipeline/checks/` pueda comprobar el importe, la fecha, el sello y el pago sobre ellos. Si
 ningún segmento respalda al gasto se enlazan los de tipo factura/recibo/liquidación del documento.
 
 ### 3. `carpeta_completa` (por proyecto, en `match_config.py`)
@@ -171,7 +171,7 @@ cuenta como acierto no asignar nada a un gasto sin documento esperado, y casi to
 
 **Paraguay pierde cobertura:** el motor de contenido solo daba 6 vínculos (5 correctos, 3 de ellos de confianza baja); el híbrido solo asigna por contenido con evidencia sólida y se queda en 3 (los 3 correctos, precisión del 100 % en vez del 83 %), a cambio de dejar sin asignar dos aciertos de confianza baja.
 
-**Contrapartida:** como ahora hay muchos más gastos con documento, `checks.py` se ejecuta sobre 179 en vez de 37
+**Contrapartida:** como ahora hay muchos más gastos con documento, `pipeline/checks/` se ejecuta sobre 179 en vez de 37
 (Uganda: 260 incidencias de comprobación frente a 78): `AMOUNT_MISMATCH` pasa de 0 a 36 y `DATE_MISMATCH` de 10 a
 45. Dada la tabla anterior, **buena parte de los `AMOUNT_MISMATCH` son ruido de OCR** sobre asignaciones
 correctas; el mensaje enseña el importe leído y el del gasto para que el revisor lo descarte rápido.
@@ -235,7 +235,7 @@ renombrados al azar**. Resultados (14/11/2026):
 - La validación usa la numeración de los nombres como verdad: si una persona se equivocó al numerar, el error cuenta
   contra el cruce.
 
-## Comprobaciones de justificantes (`pipeline/checks.py` + `backend/rules/<donante>.yaml`)
+## Comprobaciones de justificantes (`pipeline/checks/` + `backend/rules/<donante>.yaml`)
 
 Sobre cada gasto y los segmentos que lo respaldan se ejecutan diez comprobaciones. **Los umbrales,
 tolerancias, requisitos de documentos, la referencia normativa y la severidad están en el YAML del
@@ -247,6 +247,18 @@ es un error; una regla se apaga con `active: false`). `sync_rules` las vuelca a 
 - `rules/aecid.yaml`: parte de la Guía AECID (nov. 2019): 10.6 (R11-VII.1.6, pág. 88), 10.7 (R11-VII.5, pág. 89),
   11.1 (R11-VII.2.1, pág. 90), 11.2 (R11-VII.3.1, pág. 93) y 11.4 (R11-VII.4.2.6, pág. 117; 4.2.9, pág. 122).
   `Rules.xlsx` es solo de Xunta.
+
+`pipeline/checks/` es un paquete (la API pública sigue siendo `from app.pipeline.checks import run_checks,
+build_context, check_documents, check_file_completeness, check_duplicates…`):
+
+| Módulo | Contenido |
+|---|---|
+| `context.py` | `Seg`, `ExpenseFacts`, `Case`, `CheckContext`, helpers comunes (`_finding`, `unreliable_reading`, `soften`…), `project_period` y `build_context` (lee la BD) |
+| `documents.py` | importe, fecha, sello, factura válida, prueba de pago, efectivo e ilegible (`check_documents`) |
+| `period.py` | `DATE_OUT_OF_PERIOD` |
+| `completeness.py` | `DOC_INCOMPLETE` (`check_file_completeness`) |
+| `duplicates.py` | `DUPLICATE_INVOICE` (`check_duplicates`) |
+| `__init__.py` | `run_checks` (ejecuta todo y persiste) y los reexports |
 
 | Regla | Qué comprueba | Xunta | AECID |
 |---|---|---|---|

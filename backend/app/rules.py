@@ -2,7 +2,7 @@
 
 Each rule has a code, a Spanish description, the partidas it applies to, its normative
 reference, a severity and free-form `params` read by the check that implements it
-(app/pipeline/checks.py). Nothing donor-specific lives in the checks' code: thresholds, tolerances,
+(app/pipeline/checks/). Nothing donor-specific lives in the checks' code: thresholds, tolerances,
 document requirements per expense type... are all here.
 
     donor: xunta
