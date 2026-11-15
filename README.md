@@ -358,7 +358,12 @@ es decir, de lo que el pipeline ha leído y cruzado de verdad:
 - **PDF al lado:** *Ver en el PDF* abre la página del problema, con anterior/siguiente y giro de 90° (muchos
   escaneos vienen del revés), y un enlace para abrir el PDF original. Solo se sirven archivos registrados
   que estén dentro de `DATA_DIR`.
-- **Excel:** *Descargar Excel revisado* genera el mismo libro que Streamlit, con las decisiones tomadas.
+- **Informe Excel:** *Descargar informe Excel* (`GET /api/ui/pilots/{key}/report.xlsx`, `pipeline/report.py`) genera un
+  informe del análisis con las decisiones tomadas hasta ese momento: **Resumen** (totales por veredicto),
+  **Análisis por gasto** (una fila por gasto: veredicto y semáforo, justificante, lo leído dentro del PDF e
+  incidencias), **Incidencias**, **Presupuesto** y **Topes**. Sale de la misma vista que la página, así que
+  coinciden. El libro técnico de siempre sigue en `.../export.xlsx`.
+- **Google Drive:** se puede conectar una carpeta de Drive en vez de copiar los archivos (ver «Google Drive»).
 - **IA externa:** la página solo **muestra** si está activada (`LLM_PROVIDER` / `ALLOW_EXTERNAL_LLM` del
   `.env`). No pide ni guarda ninguna clave en el navegador.
 
@@ -366,9 +371,46 @@ es decir, de lo que el pipeline ha leído y cruzado de verdad:
 proyectos se definen en `PILOTS` y se leen de `DATA_DIR`), las reglas editables desde la interfaz (las reglas
 viven en `rules/<donante>.yaml`), la clave de Claude guardada en el navegador y el OCR en el navegador.
 
-Rutas que usa (`app/api/ui.py`): `GET /api/ui/pilots`, `POST` y `GET /api/ui/pilots/{key}/run`,
-`GET /api/ui/pilots/{key}/review`, `.../budget`, `.../export.xlsx`, `GET /api/ui/documents/{id}/page/{n}.png`
-y `.../file`. Probada con `tests/test_web_app.py` (datos inventados) y a mano con Uganda.
+Rutas que usa (`app/api/ui.py`): `GET /api/ui/pilots`, `POST /api/ui/drive/projects`,
+`DELETE /api/ui/drive/projects/{key}`, `POST` y `GET /api/ui/pilots/{key}/run`, `GET /api/ui/pilots/{key}/review`,
+`.../budget`, `.../report.xlsx`, `.../export.xlsx`, `GET /api/ui/documents/{id}/page/{n}.png` y `.../file`. Probada con `tests/test_web_app.py` (datos inventados) y a mano con Uganda.
+
+## Google Drive (`app/drive.py`, `app/projects.py`)
+
+En la app web, el bloque **☁️ Conectar una carpeta de Google Drive** añade un proyecto a partir de una carpeta de
+Drive con el informe económico (Excel o Google Sheets) y los justificantes. Al lanzar el análisis, la carpeta
+se **copia** a `DATA_DIR/_drive/<código>/` (solo lo nuevo o cambiado; lo borrado en Drive se borra de la copia)
+y se analiza como cualquier otro proyecto. Las conexiones se guardan en `DATA_DIR/_drive/proyectos.json`, dentro
+de la carpeta de datos confidenciales, nunca en el repositorio. Permiso de solo lectura (`drive.readonly`).
+
+**Credenciales** (en `.secrets/`, ignorada por git; rutas en `GOOGLE_CREDENTIALS` / `GOOGLE_TOKEN`):
+
+| Opción | Cómo | Cuándo |
+|---|---|---|
+| **Cuenta de servicio** (recomendada con Docker) | Google Cloud Console → proyecto → activar *Google Drive API* → *Credenciales* → *Cuenta de servicio* → *Claves* → JSON. Guárdalo como `.secrets/credentials.json` y **comparte la carpeta de Drive** (lector) con el correo de la cuenta de servicio | Sin navegador; funciona dentro de Docker |
+| **OAuth (app de escritorio)** | Mismo sitio → *ID de cliente OAuth* tipo *Aplicación de escritorio* → JSON como `.secrets/credentials.json`. Después, **una vez y fuera de Docker**: `cd backend && python -m app.drive` (abre el navegador y guarda `.secrets/token.json`) | Si no se puede compartir con una cuenta de servicio |
+
+Sin credenciales o sin el extra `drive`, el resto de la app funciona y la página explica qué falta.
+Con Docker: `.secrets/` se monta en `/secrets` y `DATA_DIR/_drive` se monta con escritura (el resto de
+`DATA_DIR` sigue en solo lectura). Probado con `tests/test_drive_source.py` (Drive simulado, sin red).
+
+## Cómo ejecutar y probar la app de revisión
+
+```bash
+cp .env.example .env            # DATA_DIR = ruta local de TUM_SociAI (con DocJustificativa/)
+mkdir -p .secrets               # opcional: credentials.json para Google Drive
+docker compose up --build api   # levanta PostgreSQL + API (migraciones automáticas)
+```
+
+Abre **http://localhost:8000**.
+
+1. **Proyecto de ejemplo:** elige Uganda o Paraguay → *Lanzar análisis* (la primera vez el OCR tarda; luego
+   usa la caché) → revisa gastos, abre *Ver en el PDF*, marca alguna incidencia → *Descargar informe Excel*.
+2. **Drive:** pega el enlace de una carpeta de prueba (con un informe y algunos PDF), nombre y donante →
+   *Conectar carpeta* → aparece como pestaña ☁️ → *Lanzar análisis* (descarga y analiza) → informe Excel.
+   Para quitarla: *Quitar esta conexión de Drive* (los archivos descargados se conservan).
+3. **Tests:** `docker compose run --rm api pytest` (los de base de datos necesitan una base vacía; sin Docker,
+   `cd backend && pytest` salta los que necesitan PostgreSQL o `DATA_DIR`).
 
 ## App de revisión (Streamlit, `backend/ui/streamlit_app.py`)
 
@@ -548,7 +590,8 @@ interfaz que se mantiene; lo que el conciliador tiene de más se va portando aqu
 | Fecha de pago como segunda fecha del cruce por contenido | **Pendiente.** En La Rioja la fecha del documento era la de pago en 8 de 15 casos. Aquí cambia los resultados de `match_content.py` y hay que medirlo antes con `make evaluar-hibrido` (hoy la fecha de pago solo se usa en `DATE_MISMATCH`) |
 | Tope de llamadas por ejecución, exclusión de archivos (nóminas) y leer solo los documentos dudosos | **Pendiente.** El backend lee todas las páginas de todos los PDF; con el LLM activado eso es coste y datos personales enviados fuera |
 | Proyectos ECHO (Colombia) y La Rioja (Colombia) | Solo en el conciliador (`config/*.yaml`). Aquí hace falta un adaptador de donante por cada uno (`app/adapters/`) |
-| Google Drive y un YAML por proyecto | Solo en el conciliador |
+| Un YAML por proyecto | Solo en el conciliador |
+| Google Drive | En la app web (ver «Google Drive») y en el conciliador |
 
 **Lo que enseñaron las pruebas reales del conciliador con Claude** (detalle en `docs/conciliador.md`, sección 9), útil para este backend:
 
