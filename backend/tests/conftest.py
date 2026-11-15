@@ -110,3 +110,50 @@ def db_session() -> Iterator[Session]:
         session.close()
         transaction.rollback()
         connection.close()
+
+
+@pytest.fixture
+def api(db_session, client):
+    """Test client whose requests use the test transaction (`db_session`)."""
+    from app.db import get_session
+    from app.main import app
+
+    app.dependency_overrides[get_session] = lambda: db_session
+    yield client
+    app.dependency_overrides.clear()
+
+
+class _SameSession:
+    """`with SessionLocal() as s` that hands out the test session and does not close it."""
+
+    def __init__(self, session):
+        self.session = session
+
+    def __call__(self):
+        return self
+
+    def __enter__(self):
+        return self.session
+
+    def __exit__(self, *args):
+        return False
+
+
+@pytest.fixture
+def sync_jobs(db_session, monkeypatch):
+    """Analysis runs execute synchronously, in the test transaction."""
+    from app.api import projects as projects_api
+    from app.services import jobs
+
+    monkeypatch.setattr(jobs.db, "SessionLocal", _SameSession(db_session))
+    monkeypatch.setattr(projects_api, "launcher", jobs.execute_job)
+    return jobs
+
+
+@pytest.fixture
+def data_root(tmp_path, monkeypatch):
+    """DATA_DIR pointing to an empty temporary folder."""
+    root = tmp_path / "datos"
+    root.mkdir()
+    monkeypatch.setattr(get_settings(), "data_dir", root)
+    return root

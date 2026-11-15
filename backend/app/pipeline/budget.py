@@ -33,9 +33,9 @@ from sqlalchemy.orm import Session
 from app.adapters import get_adapter
 from app.enums import Donor, Severity
 from app.models import BudgetLine, Expense, Project
-from app.pipeline.match import _sync_findings
 from app.rules import partida_matches
 from app.schemas import FindingIn, Limit, LimitBase, LimitScope
+from app.services.findings import sync_findings
 
 RULE_LIMIT_EXCEEDED = "LIMIT_EXCEEDED"
 RULE_BUDGET_DEVIATION = "BUDGET_DEVIATION"
@@ -400,6 +400,6 @@ def run_budget(session: Session, project_id: int) -> BudgetAnalysis:
     """Compute the execution and persist its findings: the OPEN ones of a previous run are
     replaced, the reviewer's decisions (accepted / false positive) are kept."""
     analysis = compute_execution(session, project_id)
-    _sync_findings(session, project_id, BUDGET_CODES, analysis.findings)
+    sync_findings(session, project_id, BUDGET_CODES, analysis.findings)
     session.commit()
     return analysis

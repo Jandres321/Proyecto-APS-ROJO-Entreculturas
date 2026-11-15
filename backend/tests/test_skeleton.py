@@ -36,6 +36,7 @@ def test_metadata_has_all_tables():
         "extraction",
         "rule",
         "finding",
+        "analysis_job",
     }
     assert expected <= set(models.Base.metadata.tables)
 

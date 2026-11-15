@@ -18,6 +18,28 @@ class ProjectStatus(StrEnum):
     ERROR = "error"
 
 
+class SourceType(StrEnum):
+    """Where a project's files come from."""
+
+    LOCAL = "local"  # a folder already under DATA_DIR (the sample projects)
+    UPLOAD = "upload"  # files uploaded from the browser, stored under DATA_DIR/_proyectos/<key>
+    DRIVE = "drive"  # a Google Drive folder mirrored into DATA_DIR/_proyectos/<key>
+
+
+class LlmMode(StrEnum):
+    """Use of the external vision LLM when reading the PDFs (always behind ALLOW_EXTERNAL_LLM)."""
+
+    OFF = "off"
+    DOUBTFUL = "dudosas"  # only pages the OCR reads badly
+    ALL = "todas"
+
+
+class JobState(StrEnum):
+    RUNNING = "running"
+    DONE = "done"
+    ERROR = "error"
+
+
 class MatchMethod(StrEnum):
     FILENAME = "filename"
     CONTENT = "content"

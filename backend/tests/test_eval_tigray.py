@@ -47,7 +47,15 @@ def workbook(tmp_path):
             None,
             None,
         ),
-        ("A.V", 4.0, "F-4", "Concepto de factura no coincide", "Consultado con el socio", None, None),
+        (
+            "A.V",
+            4.0,
+            "F-4",
+            "Concepto de factura no coincide",
+            "Consultado con el socio",
+            None,
+            None,
+        ),
     ]
     for partida, order, invoice, inc1, com1, inc2, com2 in rows:
         ws.append(

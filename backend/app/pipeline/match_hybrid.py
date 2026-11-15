@@ -34,7 +34,7 @@ from sqlalchemy.orm import Session
 from app.enums import Confidence, MatchMethod, Severity
 from app.models import Document, ExpenseDocument, ExpenseSegment, Project
 from app.pipeline.conciliador import NameCandidate, NameProposal, NameReconciler
-from app.pipeline.match import _sync_findings, match_name
+from app.pipeline.match import match_name
 from app.pipeline.match_config import KIND_NORMAL, MatchConfig, get_match_config
 from app.pipeline.match_content import (
     ACCEPT,
@@ -60,6 +60,7 @@ from app.pipeline.match_content import (
     match_segments,
 )
 from app.schemas import FindingIn
+from app.services.findings import sync_findings
 
 INVOICE_LIKE = {"factura", "recibo", "liquidacion"}
 
@@ -797,7 +798,7 @@ def match_project(
     findings, summary.not_in_sample = build_hybrid_findings(
         result, expenses, content_segments, config, raw_names, doc_ids
     )
-    _sync_findings(session, project_id, CONTENT_RULES, findings)
+    sync_findings(session, project_id, CONTENT_RULES, findings)
     session.commit()
 
     summary.links = len(result.links)

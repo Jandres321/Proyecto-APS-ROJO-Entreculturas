@@ -26,10 +26,13 @@ from app.enums import (
     Confidence,
     Donor,
     FindingStatus,
+    JobState,
+    LlmMode,
     MatchMethod,
     ProjectStatus,
     RuleKind,
     Severity,
+    SourceType,
     TipoSegmento,
 )
 
@@ -47,6 +50,16 @@ def enum_type(enum_cls: type[StrEnum]) -> SAEnum:
         length=32,
         values_callable=lambda e: [m.value for m in e],
     )
+
+
+def _default_project_key(context: Any) -> str:
+    """Unique slug when a project is created without an explicit key (the API always sets one)."""
+    import re
+    import uuid
+
+    params = context.get_current_parameters()
+    base = re.sub(r"[^a-z0-9]+", "-", str(params.get("code") or params.get("name") or "").lower())
+    return f"{base.strip('-')[:60] or 'proyecto'}-{uuid.uuid4().hex[:6]}"
 
 
 def created_at_column() -> Mapped[dt.datetime]:
@@ -70,6 +83,32 @@ class Project(Base):
     # 0-100, updated by the pipeline while processing.
     progress: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
 
+    # Stable identifier used in URLs (slug), unique.
+    key: Mapped[str] = mapped_column(
+        String(80), unique=True, index=True, default=_default_project_key
+    )
+    # Where the files come from and where they are on disk (relative to DATA_DIR).
+    source_type: Mapped[SourceType] = mapped_column(
+        enum_type(SourceType), default=SourceType.LOCAL, server_default=SourceType.LOCAL.value
+    )
+    # Drive folder id for `drive`; unused for `local` / `upload`.
+    source_ref: Mapped[str | None] = mapped_column(String(300))
+    folder: Mapped[str | None] = mapped_column(String(500))
+    # Report spreadsheet, relative to `folder`. Empty: located when the analysis starts.
+    report_file: Mapped[str | None] = mapped_column(String(500))
+    # Execution period of the project (dates outside it are findings).
+    start_date: Mapped[dt.date | None] = mapped_column(Date)
+    end_date: Mapped[dt.date | None] = mapped_column(Date)
+    # Overrides of the donor's default matching config (see pipeline/match_config.py).
+    match_config: Mapped[dict[str, Any] | None]
+    # Reading the PDFs with the external vision LLM (only if ALLOW_EXTERNAL_LLM is true).
+    llm_mode: Mapped[LlmMode] = mapped_column(
+        enum_type(LlmMode), default=LlmMode.OFF, server_default=LlmMode.OFF.value
+    )
+    llm_max_pages: Mapped[int] = mapped_column(Integer, default=20, server_default="20")
+    # Sample projects shipped with the app (created by app/samples.py).
+    is_sample: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+
     budget_lines: Mapped[list["BudgetLine"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", passive_deletes=True
     )
@@ -82,6 +121,26 @@ class Project(Base):
     findings: Mapped[list["Finding"]] = relationship(
         back_populates="project", cascade="all, delete-orphan", passive_deletes=True
     )
+
+
+class AnalysisJob(Base):
+    """One run of the review pipeline for a project: state and progress, persisted so that it
+    survives a restart of the API and can be read by any process."""
+
+    __tablename__ = "analysis_job"
+
+    id: Mapped[int] = mapped_column(primary_key=True)
+    project_id: Mapped[int] = mapped_column(
+        ForeignKey("project.id", ondelete="CASCADE"), index=True
+    )
+    state: Mapped[JobState] = mapped_column(enum_type(JobState))
+    step: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    steps: Mapped[int] = mapped_column(Integer, default=0, server_default="0")
+    fraction: Mapped[float] = mapped_column(Float, default=0.0, server_default="0")
+    message: Mapped[str] = mapped_column(Text, default="", server_default="")
+    reread_report: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    started_at: Mapped[dt.datetime] = created_at_column()
+    finished_at: Mapped[dt.datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class BudgetLine(Base):

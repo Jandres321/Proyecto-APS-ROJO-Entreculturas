@@ -28,7 +28,7 @@ COLORS = {
 MAX_COLUMN_WIDTH = 70
 
 
-def _findings_table(session: Session, project_id: int) -> pd.DataFrame:
+def findings_table(session: Session, project_id: int) -> pd.DataFrame:
     rows = []
     documents = {
         d.id: d for d in session.scalars(select(Document).where(Document.project_id == project_id))
@@ -124,7 +124,7 @@ def _expenses_table(session: Session, project_id: int) -> pd.DataFrame:
     return pd.DataFrame(rows)
 
 
-def _budget_tables(analysis: BudgetAnalysis) -> tuple[pd.DataFrame, pd.DataFrame]:
+def budget_tables(analysis: BudgetAnalysis) -> tuple[pd.DataFrame, pd.DataFrame]:
     partidas = pd.DataFrame(
         [
             {
@@ -161,7 +161,7 @@ def _budget_tables(analysis: BudgetAnalysis) -> tuple[pd.DataFrame, pd.DataFrame
     return partidas, limits
 
 
-def _format(ws, df: pd.DataFrame, percent_columns: tuple[str, ...] = ()) -> None:
+def format_sheet(ws, df: pd.DataFrame, percent_columns: tuple[str, ...] = ()) -> None:
     ws.freeze_panes = "A2"
     if ws.max_row > 1:
         ws.auto_filter.ref = ws.dimensions
@@ -192,9 +192,9 @@ def export_project_xlsx(session: Session, project_id: int, out_path: Path) -> Pa
     project = session.get(Project, project_id)
     if project is None:
         raise LookupError(f"Project {project_id} not found")
-    partidas, limits = _budget_tables(compute_execution(session, project_id))
+    partidas, limits = budget_tables(compute_execution(session, project_id))
     sheets = [
-        ("Incidencias", _findings_table(session, project_id), ()),
+        ("Incidencias", findings_table(session, project_id), ()),
         ("Gastos", _expenses_table(session, project_id), ()),
         ("Presupuesto", partidas, ("Desviación %",)),
         ("Topes", limits, ("Porcentaje", "Máximo %")),
@@ -203,5 +203,5 @@ def export_project_xlsx(session: Session, project_id: int, out_path: Path) -> Pa
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         for name, frame, percent in sheets:
             frame.to_excel(writer, sheet_name=name, index=False)
-            _format(writer.sheets[name], frame, percent)
+            format_sheet(writer.sheets[name], frame, percent)
     return out_path

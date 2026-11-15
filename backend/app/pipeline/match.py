@@ -24,7 +24,7 @@ from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.enums import FindingStatus, MatchMethod, Severity
+from app.enums import MatchMethod, Severity
 from app.models import Document, Expense, ExpenseDocument, Finding, Project
 from app.pipeline.ingest import ZIP_MEMBER_SEPARATOR, scan_documents
 from app.pipeline.match_config import MatchConfig, document_required, get_match_config
@@ -36,6 +36,7 @@ from app.schemas import (
     FindingIn,
     MatchReportOut,
 )
+from app.services.findings import sync_findings
 
 logger = logging.getLogger(__name__)
 
@@ -124,49 +125,6 @@ def _project(session: Session, project_id: int) -> Project:
     return project
 
 
-def _finding_key(
-    rule_code: str, expense_id: int | None, document_id: int | None, evidence: dict | None
-) -> tuple:
-    """Identity of a finding across runs. Findings tied to neither an expense nor a document
-    (budget ones) carry `evidence["subject"]` (partida or limit code) so that a decision on one
-    does not hide the others of the same rule."""
-    subject = evidence.get("subject") if evidence else None
-    return (rule_code, expense_id, document_id, subject)
-
-
-def _sync_findings(
-    session: Session, project_id: int, rule_codes: set[str], new: list[FindingIn]
-) -> None:
-    """Replace the OPEN findings of `rule_codes` with `new`, keeping reviewer decisions.
-
-    A finding for which the reviewer already
-    decided (accepted / false positive) on the same expense+document (+ subject) is not created
-    again.
-    """
-    session.execute(
-        delete(Finding).where(
-            Finding.project_id == project_id,
-            Finding.rule_code.in_(rule_codes),
-            Finding.status == FindingStatus.OPEN,
-        )
-    )
-    reviewed = {
-        _finding_key(f.rule_code, f.expense_id, f.document_id, f.evidence)
-        for f in session.scalars(
-            select(Finding).where(
-                Finding.project_id == project_id, Finding.rule_code.in_(rule_codes)
-            )
-        )
-    }
-    for finding in new:
-        key = _finding_key(
-            finding.rule_code, finding.expense_id, finding.document_id, finding.evidence
-        )
-        if key in reviewed:
-            continue
-        session.add(Finding(project_id=project_id, **finding.model_dump()))
-
-
 def _relative_base(folder: Path) -> Path:
     """Paths are stored relative to DATA_DIR when the folder lives under it."""
     data_dir = get_settings().data_dir
@@ -253,7 +211,7 @@ def register_documents(
         )
         for dup in result.duplicates
     ]
-    _sync_findings(session, project_id, {RULE_DOC_DUPLICATE}, findings)
+    sync_findings(session, project_id, {RULE_DOC_DUPLICATE}, findings)
     session.commit()
     return result
 
@@ -441,6 +399,6 @@ def match_report(
         )
 
     if emit_findings:
-        _sync_findings(session, project_id, {RULE_DOC_MISSING, RULE_DOC_ORPHAN}, findings)
+        sync_findings(session, project_id, {RULE_DOC_MISSING, RULE_DOC_ORPHAN}, findings)
         session.commit()
     return report

@@ -300,13 +300,13 @@ def test_ocr_dates_outside_the_period_are_soft_when_the_reading_is_doubtful():
     assert finding.severity == Severity.LOW and finding.message.startswith("Revisar la lectura")
 
 
-def test_project_period_reads_optional_columns():
-    from types import SimpleNamespace
+def test_project_period_comes_from_the_project_dates():
+    from app.models import Project
 
-    assert ck.project_period(SimpleNamespace()) is None  # columns not added yet
-    assert ck.project_period(SimpleNamespace(start_date=None, end_date=None)) is None
-    both = SimpleNamespace(start_date=dt.datetime(2024, 1, 1, 9), end_date=D(2024, 12, 31))
-    assert ck.project_period(both) == PERIOD
+    assert ck.project_period(Project(start_date=None, end_date=None)) is None
+    open_end = Project(start_date=D(2024, 1, 1), end_date=None)
+    assert ck.project_period(open_end) == (D(2024, 1, 1), None)
+    assert ck.project_period(Project(start_date=D(2024, 1, 1), end_date=D(2024, 12, 31))) == PERIOD
 
 
 # --- DONOR_STAMP_MISSING ---

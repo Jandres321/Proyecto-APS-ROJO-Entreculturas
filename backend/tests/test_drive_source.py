@@ -1,17 +1,16 @@
-"""Google Drive as a source of files: listing, mirroring, the registry of connected folders and
-the /api/ui routes, against a fake Drive API (no network, no credentials)."""
+"""Google Drive as a source of files: listing, mirroring and Drive projects through the API,
+against a fake Drive API (no network, no credentials)."""
 
 import json
 import re
-import time
-from types import SimpleNamespace
 
 import pytest
 
-from app import drive, projects
-from app.api import ui
-from app.config import Settings, get_settings
-from app.pipeline.run import PilotProject
+from app import drive
+from app.config import Settings
+from app.pipeline.match_content import ContentMatchSummary
+from app.pipeline.run import RunSummary
+from app.services.projects import ProjectError, find_report
 
 FOLDER, SHEET, SHORTCUT = drive.MIME_FOLDER, drive.MIME_GOOGLE_SHEET, drive.MIME_SHORTCUT
 PDF = "application/pdf"
@@ -159,42 +158,7 @@ def test_a_folder_that_cannot_be_opened_is_a_clear_error():
     )
 
 
-# --- registry of connected folders and the report ---
-
-
-@pytest.fixture
-def data_dir(tmp_path, monkeypatch):
-    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)
-    monkeypatch.setattr(projects, "PILOTS", {})
-    monkeypatch.setattr(ui, "_jobs", {})
-    return tmp_path
-
-
-def test_connected_folders_are_remembered_and_listed_after_the_pilots(data_dir, monkeypatch):
-    builtin = PilotProject("p", "Piloto", "xunta", "P-1", "carpeta", "informe.xls")
-    monkeypatch.setattr(projects, "PILOTS", {"p": builtin})
-    assert projects.drive_projects() == {}
-
-    project = projects.connect_drive_folder("1AbCdEfGhIjKlMn", "Mi proyecto", "aecid", "inf.xlsx")
-    assert (project.key, project.code, project.folder) == (
-        "drive-1abcdefghi",
-        "DRIVE-1AbCdEfGhI",
-        "_drive/DRIVE-1AbCdEfGhI",
-    )
-    assert list(projects.all_projects()) == ["p", "drive-1abcdefghi"]
-    assert projects.all_projects()[project.key].donor == "aecid"
-    # connecting the same folder again updates it instead of duplicating it
-    projects.connect_drive_folder("1AbCdEfGhIjKlMn", "Otro nombre", "xunta")
-    assert [p.title for p in projects.drive_projects().values()] == ["Otro nombre"]
-
-    with pytest.raises(projects.ProjectError, match="Donante"):
-        projects.connect_drive_folder("1AbCdEfGhIjKlMn", "x", "echo")
-    with pytest.raises(projects.ProjectError, match="nombre"):
-        projects.connect_drive_folder("1AbCdEfGhIjKlMn", " ", "xunta")
-    projects.disconnect_drive_folder(project.key)
-    assert projects.drive_projects() == {}
-    with pytest.raises(projects.ProjectError):
-        projects.disconnect_drive_folder(project.key)
+# --- the report inside a folder ---
 
 
 def test_the_report_is_found_or_the_candidates_are_named(tmp_path):
@@ -205,108 +169,92 @@ def test_the_report_is_found_or_the_candidates_are_named(tmp_path):
             (root / name).write_bytes(b"x")
         return root
 
-    assert projects.find_report(folder("a.pdf", "Listado.xlsx")) == "Listado.xlsx"  # the only one
+    assert find_report(folder("a.pdf", "Listado.xlsx")) == "Listado.xlsx"  # the only one
     both = folder("Informe económico final.xls", "sub/Presupuesto.xlsx", "~$Informe.xlsx")
-    assert projects.find_report(both) == "Informe económico final.xls"  # the one named "informe"
-    assert projects.find_report(both, "presupuesto") == "sub/Presupuesto.xlsx"  # the user's hint
-    with pytest.raises(projects.ProjectError, match="No encuentro el informe «otro»"):
-        projects.find_report(both, "otro")
-    with pytest.raises(projects.ProjectError, match="varias hojas.*A.xlsx, B.xlsx"):
-        projects.find_report(folder("A.xlsx", "B.xlsx"))
-    with pytest.raises(projects.ProjectError, match="ninguna hoja"):
-        projects.find_report(folder("a.pdf"))
+    assert find_report(both) == "Informe económico final.xls"  # the one named "informe"
+    assert find_report(both, "presupuesto") == "sub/Presupuesto.xlsx"  # the user's hint
+    with pytest.raises(ProjectError, match="No encuentro el informe «otro»"):
+        find_report(both, "otro")
+    with pytest.raises(ProjectError, match="varias hojas.*A.xlsx, B.xlsx"):
+        find_report(folder("A.xlsx", "B.xlsx"))
+    with pytest.raises(ProjectError, match="ninguna hoja"):
+        find_report(folder("a.pdf"))
 
 
-# --- /api/ui ---
+# --- a Drive project through the API (database) ---
 
 
-class FakeSession:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
+def fake_summary():
+    matching = ContentMatchSummary(expenses_linked=1, verified=0, from_name=1, from_content=0)
+    return RunSummary(project_id=0, expenses=2, documents=6, matching=matching, report_reread=False)
 
 
-def wait_for(client, key, state):
-    for _ in range(200):
-        job = client.get(f"/api/ui/pilots/{key}/run").json()
-        if job["state"] == state:
-            return job
-        time.sleep(0.02)
-    raise AssertionError(f"the run never reached {state!r}: {job}")
-
-
-def test_connecting_and_analysing_a_drive_folder(data_dir, client, monkeypatch):
+def test_creating_and_analysing_a_drive_project(data_root, api, sync_jobs, monkeypatch):
     service = FakeDrive(tree(), names={"raiz1234567890": "Carpeta del socio"})
     service.tree["raiz1234567890"] = service.tree.pop("raiz")
-    monkeypatch.setattr(ui.drive, "build_service", lambda *a, **k: service)
-    monkeypatch.setattr(ui.db, "SessionLocal", FakeSession)
+    monkeypatch.setattr(drive, "build_service", lambda *a, **k: service)
     seen = {}
 
-    def fake_pipeline(session, pilot, *, reread_report, on_progress):
-        seen["pilot"] = pilot
+    def fake_pipeline(session, project, *, reread_report, on_progress):
+        seen["project"] = (project.folder, project.report_file)
         on_progress("ingest", 0.0, "Leyendo el informe económico")
-        matching = SimpleNamespace(
-            expenses_linked=1, verified=0, from_name=1, from_content=0, not_in_sample=0
-        )
-        return SimpleNamespace(expenses=2, documents=6, matching=matching, report_reread=True)
+        return fake_summary()
 
-    monkeypatch.setattr(ui, "run_pipeline", fake_pipeline)
+    monkeypatch.setattr(sync_jobs, "run_pipeline", fake_pipeline)
 
     url = "https://drive.google.com/drive/folders/raiz1234567890"
-    created = client.post(
-        "/api/ui/drive/projects", json={"url": url, "title": "", "donor": "xunta"}
+    created = api.post(
+        "/api/projects",
+        json={"name": "Socio Uganda", "donor": "xunta", "source_type": "drive", "drive_url": url},
     )
-    assert created.status_code == 201
-    key = created.json()["key"]
-    assert created.json()["folder_name"] == "Carpeta del socio"  # the default title
-
-    # (the pilots listing itself needs the database: see test_web_app.py)
-    assert key in projects.all_projects() and projects.all_projects()[key].title == (
-        "Carpeta del socio"
+    assert created.status_code == 201, created.text
+    project = created.json()
+    assert (project["key"], project["source_type"], project["loaded"]) == (
+        "socio-uganda",
+        "drive",
+        False,
     )
 
-    assert client.post(f"/api/ui/pilots/{key}/run").status_code == 202
-    done = wait_for(client, key, "done")
+    started = api.post("/api/projects/socio-uganda/run")
+    assert started.status_code == 202
+    done = api.get("/api/projects/socio-uganda/run").json()
+    assert done["state"] == "done", done
     assert (
         "Drive: 7 archivos (6 descargados, 0 sin cambios, 1 documentos de Google omitidos)"
         in (done["message"])
     )
-    pilot = seen["pilot"]
     # the pipeline got the local mirror (inside DATA_DIR) and the report that was found
-    assert (pilot.folder, pilot.report) == ("_drive/DRIVE-raiz123456", "Informe económico.xlsx")
-    assert (data_dir / pilot.folder / "1. Factura.pdf").is_file()
-    assert (data_dir / "_drive" / "DRIVE-raiz123456.manifest.json").is_file()
+    assert seen["project"] == ("_proyectos/socio-uganda", "Informe económico.xlsx")
+    assert (data_root / "_proyectos" / "socio-uganda" / "1. Factura.pdf").is_file()
+    assert (data_root / "_proyectos" / "socio-uganda.manifest.json").is_file()
 
-    assert client.delete(f"/api/ui/drive/projects/{key}").status_code == 204
-    assert client.delete(f"/api/ui/drive/projects/{key}").status_code == 404
-    assert (data_dir / pilot.folder / "1. Factura.pdf").is_file()  # downloaded files are kept
+    assert api.delete("/api/projects/socio-uganda").status_code == 204
+    assert api.get("/api/projects/socio-uganda").status_code == 404
+    assert (data_root / "_proyectos" / "socio-uganda" / "1. Factura.pdf").is_file()  # kept
 
 
-def test_drive_problems_are_reported_to_the_user(data_dir, client, monkeypatch):
+def test_drive_problems_are_reported_to_the_user(data_root, api, sync_jobs, monkeypatch):
     service = FakeDrive({"raiz1234567890": [item("f1", "a.pdf")]})
-    monkeypatch.setattr(ui.drive, "build_service", lambda *a, **k: service)
-    monkeypatch.setattr(ui.db, "SessionLocal", FakeSession)
+    monkeypatch.setattr(drive, "build_service", lambda *a, **k: service)
 
     def body(**changes):
-        base = {"url": "https://drive.google.com/drive/folders/raiz1234567890", "title": "P"}
-        return {**base, "donor": "xunta", **changes}
+        base = {"drive_url": "https://drive.google.com/drive/folders/raiz1234567890"}
+        return {**base, "name": "P", "donor": "xunta", "source_type": "drive", **changes}
 
-    bad_url = client.post("/api/ui/drive/projects", json=body(url="no es un enlace"))
+    bad_url = api.post("/api/projects", json=body(drive_url="no es un enlace"))
     assert bad_url.status_code == 400 and "No reconozco" in bad_url.json()["detail"]
-    no_access = client.post("/api/ui/drive/projects", json=body(url="carpetasinacceso1"))
+    no_access = api.post("/api/projects", json=body(drive_url="carpetasinacceso1"))
     assert no_access.status_code == 400 and "no tiene acceso" in no_access.json()["detail"]
-    assert client.post("/api/ui/drive/projects", json=body(donor="echo")).status_code == 400
+    assert api.post("/api/projects", json=body(donor="echo")).status_code == 422
 
-    key = client.post("/api/ui/drive/projects", json=body()).json()["key"]
-    assert client.post(f"/api/ui/pilots/{key}/run").status_code == 202
-    failed = wait_for(client, key, "error")  # the folder has no report spreadsheet
-    assert "no tiene ninguna hoja de cálculo" in failed["message"]
+    key = api.post("/api/projects", json=body()).json()["key"]
+    assert api.post(f"/api/projects/{key}/run").status_code == 202
+    failed = api.get(f"/api/projects/{key}/run").json()  # the folder has no spreadsheet
+    assert failed["state"] == "error" and "ninguna hoja de cálculo" in failed["message"]
 
     def no_credentials(*args, **kwargs):
         raise drive.DriveError("Falta autorizar el acceso a Google Drive.")
 
-    monkeypatch.setattr(ui.drive, "build_service", no_credentials)
-    refused = client.post("/api/ui/drive/projects", json=body())
+    monkeypatch.setattr(drive, "build_service", no_credentials)
+    refused = api.post("/api/projects", json=body(name="Otro"))
     assert refused.status_code == 400 and "Falta autorizar" in refused.json()["detail"]

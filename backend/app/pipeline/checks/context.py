@@ -241,14 +241,11 @@ def expected_percent(expense: ExpenseFacts) -> float | None:
     return None
 
 
-def project_period(project: Any) -> tuple[dt.date | None, dt.date | None] | None:
-    """The project's execution period from `start_date` / `end_date` (None when it has neither;
-    the columns may not exist yet). Datetimes are reduced to dates."""
-    values = []
-    for name in ("start_date", "end_date"):
-        value = getattr(project, name, None)
-        values.append(value.date() if isinstance(value, dt.datetime) else value)
-    return (values[0], values[1]) if any(values) else None
+def project_period(project: Project) -> tuple[dt.date | None, dt.date | None] | None:
+    """The project's execution period (None when neither date is set; either end may be open)."""
+    if project.start_date is None and project.end_date is None:
+        return None
+    return project.start_date, project.end_date
 
 
 def _seg_from_row(row: Segmento, document: Document | None) -> Seg:

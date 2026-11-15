@@ -8,11 +8,10 @@ técnico las **acepta o descarta**. Salida principal: Excel. Contexto completo e
 
 | Pieza | Dónde | Para qué |
 |---|---|---|
-| **Revisor de justificación** | `backend/`, `frontend/` | La aplicación descrita en este README: lectura de PDF, cruce híbrido, reglas del donante, presupuesto y app de revisión (Streamlit) |
-| **Conciliador** (línea de comandos) | `src/conciliador/`, `config/`, `tests/` | El conciliador original, con un YAML por proyecto (Uganda, ECHO, La Rioja), lectura del contenido con Claude y Google Drive. Ver [docs/conciliador.md](docs/conciliador.md) |
+| **Revisor de justificación** | `backend/` | La aplicación descrita en este README: proyectos (ejemplo, subida, Drive), lectura de PDF, cruce híbrido, reglas del donante, presupuesto y app de revisión web |
+| **Conciliador** (línea de comandos, **legado**) | `src/conciliador/`, `config/`, `tests/` | El conciliador original por nombre de archivo, con un YAML por proyecto. Se conserva como herramienta de referencia y **ya no se mantiene**: su cruce está portado al backend (`pipeline/conciliador.py`), que es la única implementación que evoluciona. Ver [docs/conciliador.md](docs/conciliador.md) |
 
-El cruce por nombre del backend (`pipeline/conciliador.py`) es un port del conciliador. El estado de la
-integración está en [Integración con el conciliador](#integración-con-el-conciliador).
+El estado de la integración está en [Integración con el conciliador](#integración-con-el-conciliador).
 
 ## Arranque rápido
 
@@ -20,19 +19,18 @@ Requisitos: Docker Desktop (con Compose v2).
 
 ```bash
 cp .env.example .env      # y edita DATA_DIR con la ruta local de los datos confidenciales
-docker compose up --build # o: make up
+docker compose up --build api   # o: make up
 ```
 
 | Servicio | URL |
 |---|---|
-| Web (placeholder) | http://localhost:5173 |
-| API | http://localhost:8000 (docs en `/docs`, salud en `/health`) |
 | **App de revisión (web)** | http://localhost:8000 (la sirve la propia API) |
-| App de revisión (Streamlit, alternativa) | http://localhost:8501 (`make ui`) |
+| API | http://localhost:8000/api (docs en `/docs`, salud en `/health`) |
 | PostgreSQL | localhost:5432 (usuario/clave/base: `revisor`) |
 
 El contenedor `api` aplica las migraciones al arrancar y recarga el código en caliente.
-`DATA_DIR` se monta **solo lectura** en `/data`. Los datos nunca se suben al repo.
+`DATA_DIR` se monta **solo lectura** en `/data`, salvo `DATA_DIR/_proyectos` (archivos subidos y copias de
+Drive). Los datos nunca se suben al repo.
 
 ## Comandos (Makefile)
 
@@ -41,14 +39,13 @@ El contenedor `api` aplica las migraciones al arrancar y recarga el código en c
 | `make up` / `make down` | Levantar / parar el stack |
 | `make migrate` | `alembic upgrade head` en el contenedor api |
 | `make test` | `pytest` (los tests con datos reales se saltan si no hay `DATA_DIR`) |
-| `make lint` | ruff (backend) y `tsc` (frontend) |
+| `make lint` | ruff (backend) |
 | `make inspect` | Resumen por partida de los informes piloto (Uganda/Xunta y Paraguay/AECID) |
 | `make read-pdfs` | Lee los PDFs de Paraguay (OCR + segmentación) y guarda los segmentos |
 | `make match-report` | Cruce híbrido de los dos pilotos (`--solo-nombre` para el cruce por nombre de archivo): con documento, sin documento y huérfanos |
 | `make evaluar-hibrido` | Mide conciliador solo / contenido solo / híbrido contra la numeración manual e imprime la tabla |
 | `make compare-cruce` | Compara a nivel de pares nombre, contenido y ambos (y con PDFs renombrados al azar) |
 | `make checks` | Ejecuta las comprobaciones de justificantes (`rules/<donante>.yaml`) sobre los dos pilotos |
-| `make ui` | Levanta la app de revisión (Streamlit) en http://localhost:8501 |
 
 ## Cruce de justificantes: híbrido (`pipeline/conciliador.py`, `match_hybrid.py`, `match_content.py`)
 
@@ -108,7 +105,7 @@ contenido), `confidence`, `verified` y un **motivo en español**; los segmentos 
 `expense_segment` para que `pipeline/checks/` pueda comprobar el importe, la fecha, el sello y el pago sobre ellos. Si
 ningún segmento respalda al gasto se enlazan los de tipo factura/recibo/liquidación del documento.
 
-### 3. `carpeta_completa` (por proyecto, en `match_config.py`)
+### 3. `carpeta_completa` (por proyecto, en `project.match_config`)
 
 | Valor | Proyecto | Un gasto sin documento es… |
 |---|---|---|
@@ -119,8 +116,9 @@ El estado de justificante de cada gasto (`review.document_statuses`) sale en el 
 verificado por contenido · propuesto por el nombre (sin verificar) · encontrado por contenido · vinculado a mano ·
 sin justificante · no incluido en la muestra · no requiere justificante (coste indirecto / cofinanciación).
 
-> Este repo no tiene un YAML por proyecto: la configuración por proyecto vive en `match_config.py` (el
-> equivalente del YAML del conciliador original), y `carpeta_completa` está ahí.
+> La configuración de cruce de un proyecto es la de su donante (`match_config.py → DONOR_DEFAULTS`) con lo que
+> el proyecto cambie en `project.match_config` (el equivalente del YAML del conciliador original). La de los
+> proyectos de ejemplo está en `app/samples.py`.
 
 ### 4. Medición contra la numeración manual (`scripts/evaluar_hibrido.py`)
 
@@ -300,8 +298,8 @@ Paraguay, 9 en los 6 gastos con documento.
   («Funded by: Xunta de Galicia / Code / File number») se reconoce cuando se lee, pero en varios PDF el sello no sale en
   el texto y la incidencia es un falso positivo (el mensaje lo avisa). Misma limitación para las fechas manuscritas.
 - Un control que `Rules.xlsx` incluye **no está implementado**: la traducción de idiomas. El plazo de ejecución
-  (`DATE_OUT_OF_PERIOD`) se lee con `getattr(project, "start_date" / "end_date", None)`: **hasta que el modelo de
-  proyectos tenga esas columnas la regla no se aplica** (ver `docs/integracion_pendiente.md`). Los topes por partida no son por gasto: viven en
+  (`DATE_OUT_OF_PERIOD`) sale del periodo del proyecto (`start_date` / `end_date`, editable en los ajustes del
+  proyecto): **si el proyecto no tiene periodo la regla no se aplica**. Los topes por partida no son por gasto: viven en
   [Presupuesto y topes](#presupuesto-y-topes-pipelinebudgetpy).
 - `DONOR_STAMP_MISSING` y `NOT_AN_INVOICE` son heurísticos; `ILLEGIBLE` no tiene norma detrás (criterio de
   Entreculturas) y así consta en su `reference`.
@@ -376,16 +374,64 @@ es genérica porque no tenemos la regla de modificaciones de la convocatoria.
 (regla, gasto, documento) y, para las que no cuelgan de ninguno (presupuesto), por `evidence["subject"]`
 (partida o código del tope). Así una decisión sobre un tope no esconde otro de la misma regla.
 
+## Proyectos y fuentes de archivos (`app/services/`, `app/samples.py`)
+
+Un **proyecto** es una fila de la tabla `project` y es la única fuente de verdad: no hay listas fijas en el
+código ni registros en archivos JSON. Cada proyecto tiene:
+
+| Campo | Para qué |
+|---|---|
+| `key` | Identificador en las URL (slug único: `uganda-adjumani`, `proyecto-subido`…) |
+| `donor` | Decide el adaptador del informe y las reglas (`rules/<donante>.yaml`) |
+| `source_type` | De dónde salen los archivos: `local` (carpeta ya en `DATA_DIR`), `upload` (subidos desde el navegador) o `drive` (carpeta de Google Drive) |
+| `folder` / `report_file` | Carpeta de los archivos (relativa a `DATA_DIR`) y Excel del informe dentro de ella. Si no se indica el informe, se busca al lanzar el análisis |
+| `start_date` / `end_date` | Periodo de ejecución (para las comprobaciones de fechas) |
+| `match_config` | Lo que el proyecto cambia sobre la configuración de cruce por defecto de su donante (`pipeline/match_config.py → DONOR_DEFAULTS`) |
+| `llm_mode` / `llm_max_pages` | Lectura de los PDF con IA externa: `off`, `dudosas` (solo lo que el OCR lee mal) o `todas`. Siempre sujeto a `ALLOW_EXTERNAL_LLM` en `.env` |
+| `is_sample` | Proyectos de ejemplo: no se pueden borrar |
+
+- **Proyectos de ejemplo** (`app/samples.py`): Uganda (Xunta) y Paraguay (AECID). Se crean al arrancar la API
+  si su carpeta está en `DATA_DIR`. Su configuración de cruce específica (patrón de comprobantes de JRS Uganda,
+  prefijos CG/FA de Paraguay, contrato de Yvy Pora…) es **dato** en ese archivo: el código de cruce no sabe
+  nada de Uganda ni de Paraguay.
+- **Archivos subidos y de Drive** se guardan en `DATA_DIR/_proyectos/<key>/` (el informe arriba y los
+  justificantes en `justificantes/`; un `.zip` se descomprime, rechazando rutas que salgan de la carpeta y zips
+  de más de 2 GB descomprimidos). Con Docker es el único punto con escritura de `DATA_DIR`.
+- **Ejecuciones del análisis** (`app/services/jobs.py`): se guardan en la tabla `analysis_job` (estado, paso,
+  progreso, mensaje). Sobreviven a un reinicio de la API (al arrancar, las que quedaron a medias se marcan como
+  interrumpidas) y hay una sola a la vez por proyecto. Hoy se ejecutan en un hilo de la API (`launch_in_thread`);
+  pasar a una cola de tareas solo cambia esa función.
+- **Incidencias** (`app/services/findings.py → sync_findings`): cada paso del análisis sustituye sus incidencias
+  abiertas y respeta las decisiones del revisor.
+
+### API (`app/api/`)
+
+| Ruta | Qué hace |
+|---|---|
+| `GET /api/settings` | Donantes, modos de IA, si hay `DATA_DIR`, estado de Drive y de la IA externa |
+| `GET /api/projects` · `GET /api/projects/{key}` | Proyectos con nº de gastos y última ejecución |
+| `POST /api/projects` | Crear desde una carpeta de `DATA_DIR` (`local`), una carpeta de Drive (`drive`, se comprueba el acceso al crearla) o vacío para subir archivos (`upload`) |
+| `POST /api/projects/upload` | Crear subiendo de una vez el informe y los justificantes (formulario multipart) |
+| `POST /api/projects/{key}/files` | Añadir archivos a un proyecto subido |
+| `PATCH /api/projects/{key}` | Cambiar nombre, periodo, informe y lectura con IA |
+| `DELETE /api/projects/{key}?delete_files=` | Borrar el proyecto y lo revisado (y sus archivos, si se pide). Los de ejemplo no |
+| `POST /api/projects/{key}/run?reread=` · `GET .../run` | Lanzar el análisis y seguir su progreso |
+| `GET /api/projects/{key}/review` · `.../budget` | Vista por gasto y presupuesto, para la app web |
+| `GET /api/projects/{key}/report.xlsx` · `.../export.xlsx` | Informe del análisis y libro técnico |
+| `GET /api/projects/{key}/findings` · `PATCH /api/findings/{id}` | Incidencias y decisión del revisor |
+| `GET /api/documents/{id}/page/{n}.png?rotation=` · `.../file` | Página de un PDF (solo dentro de `DATA_DIR`) y el original |
+
+Documentación interactiva en http://localhost:8000/docs.
+
 ## App de revisión web (`backend/app/web/index.html`)
 
-Interfaz principal para el técnico. Es una sola página estática que sirve la API en `/` y que habla con
-`/api`: no necesita Node ni internet. Hace lo mismo que la app de Streamlit, con otra presentación.
+Interfaz única para el técnico. Es una sola página estática que sirve la API en `/` y que habla con `/api`:
+no necesita Node ni internet.
 
 **De dónde sale el diseño.** El aspecto (barra superior, tarjetas por pasos, tarjetas semáforo que filtran y
 **una fila desplegable por gasto**) viene del prototipo `app_voluntariado` del equipo. De ese prototipo se ha
 tomado **solo la estética**: sus datos venían escritos dentro de la página y los campos «leídos del PDF» eran
-copia del listado, así que sus resultados no medían nada. Aquí **todo lo que se ve sale de la base de datos**,
-es decir, de lo que el pipeline ha leído y cruzado de verdad:
+copia del listado, así que sus resultados no medían nada. Aquí **todo lo que se ve sale de la base de datos**:
 
 - Un dato que no se ha leído dentro del PDF se muestra como *no leído*; nunca se rellena con el del listado.
 - No hay porcentaje de confianza inventado: el veredicto de cada gasto se calcula con su estado de justificante
@@ -394,112 +440,56 @@ es decir, de lo que el pipeline ha leído y cruzado de verdad:
 
 | Paso | Qué hace |
 |---|---|
-| **1. Proyecto y análisis** | Pestañas con los proyectos (`pipeline/run.py: PILOTS`) y botón **Lanzar análisis**: ejecuta el pipeline completo en segundo plano con barra de progreso. *Releer el informe* se comporta igual que en Streamlit |
-| **2. Reglas, presupuesto y topes** | Reglas activas del donante (de `rules/<donante>.yaml`), aprobado frente a ejecutado por partida con su semáforo y topes del donante |
-| **3. Listado de gastos** | Una fila por gasto con su veredicto. Tarjetas semáforo (todos / hay que revisar / sin justificante / sin incidencias), buscador, filtros por incidencia, gravedad y estado, y orden. Al desplegar: **justificantes vinculados** (método, confianza, si está verificado por contenido y por qué), **qué se ha leído dentro del PDF** (emisor, nº de factura, fecha, importe, sello, prueba de pago, legibilidad, por segmento) e **incidencias del gasto** con su evidencia |
-| **4. Incidencias generales** | Las que no cuelgan de un gasto: presupuesto, topes, documentos y segmentos sin gasto |
+| **1. Proyecto y análisis** | Pestañas con los proyectos (📤 subido, ☁️ Drive). **Lanzar análisis** ejecuta todo en segundo plano con barra de progreso. **Ajustes del proyecto**: periodo, lectura con IA, informe y borrar. **Nuevo proyecto**: subir el informe y los justificantes (PDF o .zip) o conectar una carpeta de Drive, con donante, periodo y lectura con IA |
+| **2. Reglas, presupuesto y topes** | Reglas activas del donante, aprobado frente a ejecutado por partida con su semáforo y topes |
+| **3. Listado de gastos** | Una fila por gasto con su veredicto, filtros y orden. Al desplegar: justificantes vinculados, lo leído dentro del PDF por segmento e incidencias con su evidencia |
+| **4. Incidencias generales** | Las que no cuelgan de un gasto: presupuesto, topes, documentos sin gasto |
 
-- **Decisión por incidencia:** *Aceptar*, *Falso positivo* o *Reabrir*, con nota opcional (`PATCH /api/findings/{id}`).
-  Sobrevive a relanzar el análisis. En la fila del gasto hay dos atajos sobre todas sus incidencias abiertas:
-  *Dar por bueno* (las marca como falso positivo) y *Confirmar* (las acepta como reales).
-- **PDF al lado:** *Ver en el PDF* abre la página del problema, con anterior/siguiente y giro de 90° (muchos
-  escaneos vienen del revés), y un enlace para abrir el PDF original. Solo se sirven archivos registrados
-  que estén dentro de `DATA_DIR`.
-- **Informe Excel:** *Descargar informe Excel* (`GET /api/ui/pilots/{key}/report.xlsx`, `pipeline/report.py`) genera un
-  informe del análisis con las decisiones tomadas hasta ese momento: **Resumen** (totales por veredicto),
-  **Análisis por gasto** (una fila por gasto: veredicto y semáforo, justificante, lo leído dentro del PDF e
-  incidencias), **Incidencias**, **Presupuesto** y **Topes**. Sale de la misma vista que la página, así que
-  coinciden. El libro técnico de siempre sigue en `.../export.xlsx`.
-- **Google Drive:** se puede conectar una carpeta de Drive en vez de copiar los archivos (ver «Google Drive»).
-- **IA externa:** la página solo **muestra** si está activada (`LLM_PROVIDER` / `ALLOW_EXTERNAL_LLM` del
-  `.env`). No pide ni guarda ninguna clave en el navegador.
+- **Decisión por incidencia:** *Aceptar*, *Falso positivo* o *Reabrir*, con nota. Sobrevive a relanzar el
+  análisis. En cada gasto: *Dar por bueno* y *Confirmar* sobre todas sus incidencias abiertas.
+- **PDF al lado:** *Ver en el PDF* abre la página del problema, con giro de 90° y enlace al original.
+- **Informe Excel:** *Descargar informe Excel* (`pipeline/report.py`): Resumen, Análisis por gasto (una fila por
+  gasto: veredicto, justificante, lo leído e incidencias), Incidencias, Presupuesto y Topes, con las decisiones.
+- **IA externa:** la página muestra si está permitida (`.env`). No pide ni guarda claves en el navegador.
 
-**Lo que no se ha traído del prototipo, y por qué:** subir un Excel y PDFs sueltos desde el navegador (aquí los
-proyectos se definen en `PILOTS` y se leen de `DATA_DIR`), las reglas editables desde la interfaz (las reglas
-viven en `rules/<donante>.yaml`), la clave de Claude guardada en el navegador y el OCR en el navegador.
+*Releer el informe* recrea los gastos y descarta las decisiones sobre incidencias de gastos concretos (las de
+presupuesto se conservan); por eso no se hace por defecto al relanzar.
 
-Rutas que usa (`app/api/ui.py`): `GET /api/ui/pilots`, `POST /api/ui/drive/projects`,
-`DELETE /api/ui/drive/projects/{key}`, `POST` y `GET /api/ui/pilots/{key}/run`, `GET /api/ui/pilots/{key}/review`,
-`.../budget`, `.../report.xlsx`, `.../export.xlsx`, `GET /api/ui/documents/{id}/page/{n}.png` y `.../file`. Probada con `tests/test_web_app.py` (datos inventados) y a mano con Uganda.
+## Google Drive (`app/drive.py`)
 
-## Google Drive (`app/drive.py`, `app/projects.py`)
-
-En la app web, el bloque **☁️ Conectar una carpeta de Google Drive** añade un proyecto a partir de una carpeta de
-Drive con el informe económico (Excel o Google Sheets) y los justificantes. Al lanzar el análisis, la carpeta
-se **copia** a `DATA_DIR/_drive/<código>/` (solo lo nuevo o cambiado; lo borrado en Drive se borra de la copia)
-y se analiza como cualquier otro proyecto. Las conexiones se guardan en `DATA_DIR/_drive/proyectos.json`, dentro
-de la carpeta de datos confidenciales, nunca en el repositorio. Permiso de solo lectura (`drive.readonly`).
+Un proyecto `drive` guarda el id de la carpeta. Al lanzar el análisis, la carpeta se **copia** a
+`DATA_DIR/_proyectos/<key>/` (solo lo nuevo o cambiado; lo borrado en Drive se borra de la copia; el manifiesto
+de lo descargado queda fuera de la carpeta) y se analiza como cualquier otro proyecto. Permiso de solo lectura
+(`drive.readonly`).
 
 **Credenciales** (en `.secrets/`, ignorada por git; rutas en `GOOGLE_CREDENTIALS` / `GOOGLE_TOKEN`):
 
 | Opción | Cómo | Cuándo |
 |---|---|---|
-| **Cuenta de servicio** (recomendada con Docker) | Google Cloud Console → proyecto → activar *Google Drive API* → *Credenciales* → *Cuenta de servicio* → *Claves* → JSON. Guárdalo como `.secrets/credentials.json` y **comparte la carpeta de Drive** (lector) con el correo de la cuenta de servicio | Sin navegador; funciona dentro de Docker |
+| **Cuenta de servicio** (recomendada con Docker) | Google Cloud Console → proyecto → activar *Google Drive API* → *Credenciales* → *Cuenta de servicio* → *Claves* → JSON. Guárdalo como `.secrets/credentials.json` y **comparte la carpeta de Drive** (lector) con el correo de la cuenta de servicio (`client_email` del JSON) | Sin navegador; funciona dentro de Docker |
 | **OAuth (app de escritorio)** | Mismo sitio → *ID de cliente OAuth* tipo *Aplicación de escritorio* → JSON como `.secrets/credentials.json`. Después, **una vez y fuera de Docker**: `cd backend && python -m app.drive` (abre el navegador y guarda `.secrets/token.json`) | Si no se puede compartir con una cuenta de servicio |
 
-Sin credenciales o sin el extra `drive`, el resto de la app funciona y la página explica qué falta.
-Con Docker: `.secrets/` se monta en `/secrets` y `DATA_DIR/_drive` se monta con escritura (el resto de
-`DATA_DIR` sigue en solo lectura). Probado con `tests/test_drive_source.py` (Drive simulado, sin red).
+Sin credenciales o sin el extra `drive`, el resto de la app funciona y la página explica qué falta. Probado con
+`tests/test_drive_source.py` (Drive simulado, sin red). **Sin probar con una cuenta real.**
 
-## Cómo ejecutar y probar la app de revisión
+## Cómo ejecutar y probar
 
 ```bash
 cp .env.example .env            # DATA_DIR = ruta local de TUM_SociAI (con DocJustificativa/)
 mkdir -p .secrets               # opcional: credentials.json para Google Drive
-docker compose up --build api   # levanta PostgreSQL + API (migraciones automáticas)
+docker compose up --build api   # PostgreSQL + API (migraciones automáticas) · o: make up
 ```
 
 Abre **http://localhost:8000**.
 
-1. **Proyecto de ejemplo:** elige Uganda o Paraguay → *Lanzar análisis* (la primera vez el OCR tarda; luego
-   usa la caché) → revisa gastos, abre *Ver en el PDF*, marca alguna incidencia → *Descargar informe Excel*.
-2. **Drive:** pega el enlace de una carpeta de prueba (con un informe y algunos PDF), nombre y donante →
-   *Conectar carpeta* → aparece como pestaña ☁️ → *Lanzar análisis* (descarga y analiza) → informe Excel.
-   Para quitarla: *Quitar esta conexión de Drive* (los archivos descargados se conservan).
-3. **Tests:** `docker compose run --rm api pytest` (los de base de datos necesitan una base vacía; sin Docker,
-   `cd backend && pytest` salta los que necesitan PostgreSQL o `DATA_DIR`).
-
-## App de revisión (Streamlit, `backend/ui/streamlit_app.py`)
-
-Alternativa a la app web, con las mismas funciones y los mismos datos.
-
-Interfaz para el técnico: lanza el pipeline completo de un proyecto y revisa las incidencias con el PDF
-al lado.
-
-```bash
-make ui                                   # Docker: http://localhost:8501 (Tesseract incluido)
-# o, sin Docker, desde backend/ (necesita PostgreSQL migrado y DATA_DIR):
-uv pip install -e ".[dev,ui]" && streamlit run ui/streamlit_app.py --server.address localhost
-```
-
-1. **Proyecto y análisis.** Se elige un piloto (`pipeline/run.py: PILOTS`: Uganda/Xunta y Paraguay/AECID)
-   y **Lanzar análisis** ejecuta, con barra de progreso: lectura del informe → inventario de documentos →
-   lectura de los PDF (OCR con caché) → cruce por contenido → comprobaciones de justificantes → presupuesto
-   y topes. Con la caché de OCR tarda unos segundos (Uganda ~8 s, Paraguay ~3 s).
-2. **Pestaña Incidencias.** Todas las incidencias (cruce, comprobaciones y presupuesto) salen de la misma tabla
-   `finding`. Se filtran por tipo, gravedad, estado (por defecto, solo las abiertas) y texto.
-3. **Detalle.** Al seleccionar una fila: la explicación, la evidencia y, a la derecha, el **PDF en la página del
-   problema** (`evidence.pagina_inicio`; con selector de página y giro de 90/180/270° porque muchos escaneos vienen
-   del revés). En `DOC_MISSING` se enseña el candidato más cercano. Las incidencias de presupuesto no tienen PDF.
-4. **Decisión.** **Aceptar** (la incidencia es real), **Falso positivo** o **Reabrir**, con una nota opcional. Se
-   guarda en `finding.status` / `finding.reviewer_note` y **sobrevive a relanzar el análisis** (`_sync_findings`
-   solo reemplaza las abiertas).
-5. **Pestaña Presupuesto y topes.** Aprobado frente a ejecutado por partida con el semáforo, y los topes con su estado.
-6. **Excel.** *Preparar Excel* y *Descargar*: hojas `Incidencias` (con estado y nota), `Gastos` (documentos
-   vinculados y partida sugerida), `Presupuesto` y `Topes` (`pipeline/export.py`).
-
-Las mismas decisiones están en la API: `GET /api/projects/{id}/findings?status=&severity=` y
-`PATCH /api/findings/{id}` (`{"status": "accepted" | "false_positive" | "open", "reviewer_note": "..."}`).
-
-**Detalles que conviene saber:**
-- *Releer el informe* (casilla, desactivada hasta que el proyecto está cargado) recrea los gastos y **descarta las
-  decisiones sobre incidencias de gastos concretos**, porque cuelgan de los gastos borrados. Por eso no se hace por
-  defecto al relanzar. Las decisiones sobre incidencias de presupuesto se conservan.
-- A diferencia de los scripts (`make checks`, `make match-report`, que hacen rollback), la app **guarda** en la BD.
-- Lógica compartida con la API y los tests: `app/review.py` (listar, decidir, localizar documento y página) y
-  `app/pipeline/run.py` (orquestador).
-- Un PDF dentro de un `.zip` o que no está en `DATA_DIR` no se puede mostrar; la app lo avisa.
-- Probada con `AppTest` (`tests/test_streamlit_app.py`) sobre datos inventados y sobre Paraguay.
+1. **Proyecto de ejemplo:** Uganda o Paraguay → *Lanzar análisis* (la primera vez el OCR tarda; luego usa la
+   caché) → revisa gastos, *Ver en el PDF*, decide alguna incidencia → *Descargar informe Excel*.
+2. **Subida:** *Nuevo proyecto* → *Subir archivos* → nombre, donante, el Excel del informe y los justificantes
+   (varios PDF o un .zip) → *Crear proyecto* → *Lanzar análisis*.
+3. **Drive:** *Nuevo proyecto* → *Google Drive* → enlace de la carpeta (con el informe y los PDF) → *Crear
+   proyecto* → *Lanzar análisis* (descarga y analiza).
+4. **Tests:** `make test`. Los de base de datos suponen una base **vacía** (ver «Verificación» más abajo para
+   usar una base aparte); sin PostgreSQL o sin `DATA_DIR` se saltan.
 
 ## Adaptadores de donante
 
@@ -585,9 +575,6 @@ uv venv --python 3.12 && uv pip install -e ".[dev]"
 alembic upgrade head          # requiere un PostgreSQL accesible en DATABASE_URL
 uvicorn app.main:app --reload
 pytest
-
-# Frontend
-cd frontend && npm install && npm run dev
 ```
 
 Nueva migración tras cambiar `app/models.py`: `alembic revision --autogenerate -m "descripción"`.
@@ -597,30 +584,49 @@ Nueva migración tras cambiar `app/models.py`: `alembic revision --autogenerate 
 ```
 backend/app/
   main.py, config.py, db.py, models.py, schemas.py, enums.py
-  review.py   decisiones del revisor y localización de documento/página de una incidencia
-  adapters/   un adaptador por donante (xunta, aecid) tras la interfaz DonorAdapter
-  pipeline/   ingest -> match -> extract -> checks / classify / budget -> export (run.py los encadena)
-              match: conciliador.py (por nombre) + match_content.py (motor de contenido) -> match_hybrid.py
-              match_eval.py: validación contra la numeración manual
-  lectura/    OCR y segmentación de PDF
-  llm/        interfaz LLMClient + factory (proveedor por LLM_PROVIDER; "fake" para tests)
-  api/        rutas (projects, findings, ui: las de la app web)
-  review_view.py  vista por gasto (documentos, lo leído, incidencias y veredicto) para la app web
-  web/        app de revisión web: una página estática (index.html) que sirve la API en /
-backend/ui/        app de revisión alternativa (Streamlit)
-backend/alembic/   migraciones
-frontend/          Vite + React + TS (TanStack Query/Table, react-pdf, react-router)
+  samples.py      proyectos de ejemplo (Uganda, Paraguay) y su configuración de cruce, como datos
+  services/       projects (crear, ajustes, borrar, localizar el informe), sources (subida y Drive a disco),
+                  jobs (ejecuciones del análisis en la tabla analysis_job), findings (sync_findings)
+  api/            settings, projects, documents, findings
+  adapters/       un adaptador por donante (xunta, aecid) tras la interfaz DonorAdapter
+  pipeline/       ingest -> match -> checks / classify / budget -> report / export (run.py los encadena)
+                  match: conciliador.py (por nombre) + match_content.py (contenido) -> match_hybrid.py
+  lectura/        OCR, segmentación y lectura opcional con IA de los PDF
+  llm/            interfaz LLMClient + factory (fake, anthropic)
+  drive.py        Google Drive (listar y copiar una carpeta)
+  review.py, review_view.py   decisiones del revisor y vista por gasto para la app web
+  web/            app de revisión web: una página estática (index.html) que sirve la API en /
+backend/alembic/  migraciones
+backend/rules/    reglas por donante (YAML)
+src/conciliador/  conciliador original por línea de comandos (legado)
 ```
 
 ## Estado
 
 | Pieza | Estado |
 |---|---|
-| Adaptadores Xunta y AECID, ingesta, lectura de PDF, cruce híbrido (nombre propone, contenido verifica), comprobaciones | Hechos |
-| Presupuesto y topes (`budget.py`), revisión de incidencias (`review.py`), Excel (`export.py`) | Hechos |
-| App de revisión web (diseño de `app_voluntariado`, datos reales), app de Streamlit y rutas de findings de la API | Hechas |
-| Extracción con LLM (`extract.py`), sugerencia de partida (`classify.py`, proceso 2b) | Pendientes (stubs) |
-| Rutas `projects` de la API, frontend React | Pendientes (501 / placeholder) |
+| Proyectos en base de datos (ejemplo, subida, Drive), API de proyectos, ejecuciones persistidas | Hechos |
+| Adaptadores Xunta y AECID, ingesta, lectura de PDF (OCR), cruce híbrido, comprobaciones | Hechos |
+| Presupuesto y topes, partida sugerida (2b), revisión de incidencias, informe Excel | Hechos |
+| App de revisión web (única interfaz) | Hecha |
+| Lectura con IA externa | Opción de cada proyecto (`llm_mode`: no / solo páginas dudosas / todas, con tope `llm_max_pages`); el coste estimado sale en el mensaje del análisis. Falta guardarlo y enseñarlo con detalle en la web (ver `docs/integracion_pendiente.md`) |
+| Google Drive | Hecho; sin probar con credenciales reales |
+
+## Arquitectura: lo que falta para producción
+
+Decisiones tomadas para que la demo pueda crecer a producto sin rehacerla, y lo que queda:
+
+| Tema | Hoy | Siguiente paso |
+|---|---|---|
+| Ejecución del análisis | Hilo en la API, estado en `analysis_job` | Cola de tareas (RQ/Celery) sustituyendo `jobs.launch_in_thread` |
+| Archivos | Disco local (`DATA_DIR`, `_proyectos/`) | Almacenamiento de objetos (S3/Azure/GCS) detrás de `services/sources.py` |
+| Usuarios | Sin autenticación (uso local) | Usuarios, roles (técnico / revisor) y registro de quién decide cada incidencia |
+| Plantillas de informe | Un adaptador programado por donante | Plantillas configurables (hoja, cabecera, columnas) sin programar |
+| Configuración de cruce | `project.match_config` editable solo por API | Editor en la interfaz |
+| Código | `pipeline/checks.py`, `match_content.py` y `match_hybrid.py` muy grandes | Dividir en módulos (checks: en otra rama) |
+| Tests | Los de base de datos suponen base vacía | Aislar con base de datos propia por sesión de tests |
+| Evaluación | Validación contra la numeración manual (Uganda) | Verdad de referencia de Tigray (otra rama) |
+| Observabilidad | Logs de uvicorn | Logs estructurados, métricas de coste de IA y de tiempos |
 
 ## Proceso 2b: partida sugerida por gasto (`app/pipeline/classify.py`)
 
@@ -649,7 +655,7 @@ interfaz que se mantiene; lo que el conciliador tiene de más se va portando aqu
 | Fecha de pago como segunda fecha del cruce por contenido | **Pendiente.** En La Rioja la fecha del documento era la de pago en 8 de 15 casos. Aquí cambia los resultados de `match_content.py` y hay que medirlo antes con `make evaluar-hibrido` (hoy la fecha de pago solo se usa en `DATE_MISMATCH`) |
 | Tope de llamadas por ejecución, exclusión de archivos (nóminas) y leer solo los documentos dudosos | **Pendiente.** El backend lee todas las páginas de todos los PDF; con el LLM activado eso es coste y datos personales enviados fuera |
 | Proyectos ECHO (Colombia) y La Rioja (Colombia) | Solo en el conciliador (`config/*.yaml`). Aquí hace falta un adaptador de donante por cada uno (`app/adapters/`) |
-| Un YAML por proyecto | Solo en el conciliador |
+| Un YAML por proyecto | Equivalente en el backend: `project.match_config` sobre los valores por defecto del donante |
 | Google Drive | En la app web (ver «Google Drive») y en el conciliador |
 
 **Lo que enseñaron las pruebas reales del conciliador con Claude** (detalle en `docs/conciliador.md`, sección 9), útil para este backend:
@@ -665,7 +671,7 @@ interfaz que se mantiene; lo que el conciliador tiene de más se va portando aqu
 
 ```bash
 # Aplicación (esta): Docker
-docker compose up --build            # o make up / make ui
+docker compose up --build api        # o make up
 
 # Conciliador (línea de comandos), desde la raíz, con su propio entorno
 pip install -e ".[dev]"
@@ -676,22 +682,20 @@ python -m pytest                     # tests del conciliador (los del backend: m
 `DATA_DIR` de esta aplicación puede apuntar a la carpeta `TUM_SociAI/` que usa el conciliador: es el mismo
 conjunto de datos.
 
-**Verificación de la integración (15/11/2026):**
+**Verificación (15/11/2026, rama `refactor/proyectos`):**
 
 - Tests del conciliador: 57 de 57.
-- Tests del backend **dentro de Docker** (imagen `api`, con Tesseract 5.5, PostgreSQL y los datos reales
-  montados en `/data`): **332 de 332**, sin saltos, sobre una base de datos vacía.
-- **Los tests con base de datos suponen que está vacía.** Después de lanzar un análisis desde la app (web o
-  Streamlit), que sí guarda en la base, fallan 17 tests que comprueban cosas como «no hay ningún vínculo».
-  Para no borrar lo analizado, ejecútalos contra una base aparte:
+- Tests del backend con PostgreSQL y sin `DATA_DIR`: 307 pasan y 29 se saltan (los que necesitan los datos
+  reales o Tesseract con los datos). Migración 0006 probada hacia arriba, hacia abajo y otra vez hacia arriba.
+- Prueba de punta a punta contra la API (uvicorn + PostgreSQL) con los datos de Paraguay: proyecto de ejemplo
+  creado al arrancar, análisis completo (1.321 gastos, 17 documentos) e informe Excel; proyecto **subido** desde
+  la API (informe + 3 PDF), analizado y borrado con sus archivos.
+- **Los tests con base de datos suponen que está vacía.** Después de lanzar un análisis desde la app, que sí
+  guarda en la base, fallan los que comprueban cosas como «no hay ningún vínculo». Para no borrar lo analizado,
+  ejecútalos contra una base aparte:
   ```bash
   docker compose exec db createdb -U revisor revisor_test      # una vez
-  docker compose run --rm -e DATABASE_URL=postgresql+psycopg://revisor:revisor@db:5432/revisor_test       api sh -c "alembic upgrade head && pytest"
+  docker compose run --rm -e DATABASE_URL=postgresql+psycopg://revisor:revisor@db:5432/revisor_test api sh -c "alembic upgrade head && pytest"
   ```
-- Fuera de Docker (Python 3.12, sin Tesseract) pasan 322, se salta 1 y falla
-  `test_streamlit_app.py::test_launching_the_analysis_runs_the_whole_pipeline`: espera incidencias que salen de
-  leer los PDF con OCR. No es un fallo del código; para la batería completa hay que usar Docker o instalar
-  Tesseract.
-- App web probada a mano con Uganda (análisis completo, visor de PDF, decisiones, filtros, presupuesto y Excel).
-- **Sin probar:** el cliente de Anthropic contra la API real (solo con una API simulada), la app web con
-  Paraguay y la app Streamlit a mano.
+- **Sin probar:** Google Drive y el cliente de Anthropic contra los servicios reales (solo simulados), y la
+  interfaz nueva de «Nuevo proyecto» a mano en el navegador.

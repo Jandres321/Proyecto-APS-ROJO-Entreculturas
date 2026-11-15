@@ -104,6 +104,11 @@
     .drive-box p { font-size: 13px; color: #475569; }
     .drive-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
     .drive-form .wide { grid-column: 1 / -1; }
+    .drive-form label { display: flex; flex-direction: column; gap: 4px; font-size: 12px; font-weight: 600; color: #334155; }
+    .source-tabs { display: flex; gap: 8px; }
+    .source-tabs .btn.active { background: var(--primary); color: #fff; border-color: var(--primary); }
+    details.settings { border-top: 1px solid #bae6fd; padding-top: 8px; }
+    details.settings summary { cursor: pointer; font-size: 13px; font-weight: 700; color: #0f172a; }
     .drive-form input, .drive-form select {
       width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 13px;
       font-family: inherit; background: #fff;
@@ -328,23 +333,49 @@
           </div>
         </div>
         <div class="progress hidden" id="progress"><div id="progressBar"></div></div>
-        <span class="run-status" id="runStatus">Elige un proyecto.</span>
-        <button class="btn btn-sm hidden" id="disconnectBtn" onclick="disconnectDrive()" style="width:fit-content;" title="Quita el proyecto de la lista. Los archivos ya descargados y lo revisado se conservan.">✖ Quitar esta conexión de Drive</button>
+        <span class="run-status" id="runStatus">Elige un proyecto o crea uno nuevo.</span>
+        <details class="settings" id="settingsBox">
+          <summary>⚙️ Ajustes del proyecto</summary>
+          <div class="drive-form" style="margin-top:10px;">
+            <label>Inicio del periodo de ejecución<input type="date" id="setStart" /></label>
+            <label>Fin del periodo de ejecución<input type="date" id="setEnd" /></label>
+            <label class="wide">Lectura de los PDF con IA externa<select id="setLlm"></select></label>
+            <label class="wide">Excel del informe (dentro de la carpeta del proyecto)<input type="text" id="setReport" /></label>
+          </div>
+          <div class="run-row" style="margin-top:8px;">
+            <button class="btn btn-sm" onclick="saveSettings()">💾 Guardar ajustes</button>
+            <button class="btn btn-sm hidden" id="deleteBtn" onclick="deleteProject()" title="Borra el proyecto y lo revisado. Los proyectos de ejemplo no se pueden borrar.">🗑 Borrar proyecto</button>
+          </div>
+          <span class="run-status hidden" id="settingsStatus"></span>
+        </details>
       </div>
       <div class="drive-box">
         <div>
-          <h3>☁️ Conectar una carpeta de Google Drive</h3>
-          <p>En vez de copiar los archivos al equipo: pega el enlace de la carpeta con el informe económico y los justificantes. Al lanzar el análisis se descarga solo lo nuevo o lo que haya cambiado.</p>
+          <h3>➕ Nuevo proyecto</h3>
+          <p>Sube el Excel del informe económico y los justificantes (PDF o un .zip), o conecta una carpeta de Google Drive que los contenga.</p>
+        </div>
+        <div class="source-tabs">
+          <button class="btn btn-sm active" id="srcUploadBtn" onclick="setSource('upload')">📤 Subir archivos</button>
+          <button class="btn btn-sm" id="srcDriveBtn" onclick="setSource('drive')">☁️ Google Drive</button>
         </div>
         <div class="drive-form">
+          <input type="text" id="newName" placeholder="Nombre del proyecto" />
+          <select id="newDonor" title="Decide el formato del informe y las reglas que se aplican"></select>
+          <label>Inicio del periodo (opcional)<input type="date" id="newStart" /></label>
+          <label>Fin del periodo (opcional)<input type="date" id="newEnd" /></label>
+          <label class="wide">Lectura de los PDF con IA externa<select id="newLlm"></select></label>
+        </div>
+        <div class="drive-form" id="uploadFields">
+          <label class="wide">Excel del informe económico<input type="file" id="newReport" accept=".xls,.xlsx" /></label>
+          <label class="wide">Justificantes (varios PDF o un .zip)<input type="file" id="newDocs" accept=".pdf,.zip,.xls,.xlsx" multiple /></label>
+        </div>
+        <div class="drive-form hidden" id="driveFields">
           <input class="wide" type="text" id="driveUrl" placeholder="Enlace de la carpeta de Drive (drive.google.com/drive/folders/…)" />
-          <input type="text" id="driveTitle" placeholder="Nombre del proyecto" />
-          <select id="driveDonor" title="Decide el formato del informe y las reglas que se aplican"></select>
           <input class="wide" type="text" id="driveReport" placeholder="Nombre del Excel del informe (opcional: si se deja vacío, se busca)" />
         </div>
         <div class="run-row">
-          <button class="btn btn-success" id="driveBtn" onclick="connectDrive()">☁️ Conectar carpeta</button>
-          <span class="run-status" id="driveStatus" style="flex:1;">…</span>
+          <button class="btn btn-success" id="createBtn" onclick="createProject()">➕ Crear proyecto</button>
+          <span class="run-status" id="createStatus" style="flex:1;">…</span>
         </div>
       </div>
       </div>
@@ -464,54 +495,107 @@
     }
 
     /* ---------- Paso 1: proyectos y análisis ---------- */
-    async function loadPilots() {
-      const data = await api("/ui/pilots");
-      state.pilots = data.pilots;
-      state.drive = data.drive;
-      renderDriveBox(data);
+    async function loadSettings() {
+      const data = await api("/settings");
+      state.settings = data;
+      const options = (items) => items.map((o) => `<option value="${esc(o.value)}">${esc(o.label)}</option>`).join("");
+      $("newDonor").innerHTML = data.donors.map((d) => `<option value="${esc(d.value)}">Donante: ${esc(d.label)}</option>`).join("");
+      for (const id of ["newLlm", "setLlm"]) {
+        $(id).innerHTML = options(data.llm_modes);
+        // without ALLOW_EXTERNAL_LLM the option exists but the analysis would refuse it
+        for (const opt of $(id).options) opt.disabled = opt.value !== "off" && !data.external_llm;
+      }
       const pill = $("llmPill");
       if (data.external_llm) {
-        pill.textContent = `🤖 IA externa activada (${data.llm_provider}${data.llm_model ? " · " + data.llm_model : ""})`;
+        pill.textContent = `🤖 IA externa permitida (${data.llm_provider}${data.llm_model ? " · " + data.llm_model : ""})`;
         pill.className = "pill medium";
-        pill.title = "La lectura de los PDF envía páginas a un servicio externo.";
+        pill.title = "Los proyectos con lectura por IA envían páginas de sus PDF a un servicio externo.";
       } else {
         pill.textContent = "🔒 Todo en local · IA externa desactivada";
         pill.className = "pill ok";
-        pill.title = "Ningún documento sale de este equipo. La IA externa solo se activa en el archivo .env.";
+        pill.title = "Ningún documento sale de este equipo. La IA externa se permite en el archivo .env (ALLOW_EXTERNAL_LLM).";
       }
       if (!data.data_dir_available) {
         $("localNote").className = "notice warn";
-        $("localNote").textContent = "⚠️ DATA_DIR no está definido o no existe: se puede revisar lo ya cargado, pero no lanzar análisis.";
+        $("localNote").textContent = "⚠️ DATA_DIR no está definido o no existe: se puede revisar lo ya cargado, pero no crear proyectos ni lanzar análisis.";
       }
-      if (!state.key && state.pilots.length) state.key = (state.pilots.find((p) => p.loaded) || state.pilots[0]).key;
+      setSource(state.source || "upload");
+    }
+    async function loadPilots() {
+      state.pilots = await api("/projects");
+      if (!state.key || !pilot()) state.key = state.pilots.length ? (state.pilots.find((p) => p.loaded) || state.pilots[0]).key : null;
       renderTabs();
+      renderSettings();
     }
     function pilot() { return state.pilots.find((p) => p.key === state.key); }
+    const SOURCE_ICON = { local: "", upload: "📤 ", drive: "☁️ " };
     function renderTabs() {
       $("pilotTabs").innerHTML = state.pilots.map((p) => `
         <button class="country-tab ${p.key === state.key ? "active" : ""}" onclick="selectPilot('${esc(p.key)}')">
-          <span>${p.drive ? "☁️ " : ""}${esc(p.title)}</span><span class="count-pill">${p.loaded ? p.expenses + " gastos" : "sin analizar"}</span>
-        </button>`).join("");
+          <span>${SOURCE_ICON[p.source_type] || ""}${esc(p.name)}</span><span class="count-pill">${p.loaded ? p.expenses + " gastos" : "sin analizar"}</span>
+        </button>`).join("") || '<span class="step-sub">Aún no hay proyectos: crea uno a la derecha.</span>';
       const p = pilot();
+      $("runBtn").disabled = !p;
       $("reread").disabled = !p || !p.loaded;
-      $("disconnectBtn").classList.toggle("hidden", !p || !p.drive);
       if (!p || !p.loaded) $("reread").checked = false;
+    }
+    function renderSettings() {
+      const p = pilot();
+      $("settingsBox").classList.toggle("hidden", !p);
+      if (!p) return;
+      $("setStart").value = p.start_date || "";
+      $("setEnd").value = p.end_date || "";
+      $("setLlm").value = p.llm_mode;
+      $("setReport").value = p.report_file || "";
+      $("deleteBtn").classList.toggle("hidden", p.is_sample);
+      $("settingsStatus").classList.add("hidden");
+    }
+    function settingsStatus(message, kind) {
+      $("settingsStatus").className = "run-status" + (kind ? " " + kind : "");
+      $("settingsStatus").textContent = message;
+    }
+    async function saveSettings() {
+      const body = {
+        start_date: $("setStart").value || null,
+        end_date: $("setEnd").value || null,
+        llm_mode: $("setLlm").value,
+        report_file: $("setReport").value.trim() || null,
+      };
+      try {
+        await api(`/projects/${state.key}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        await loadPilots();
+        settingsStatus("✅ Ajustes guardados. Se aplican en el próximo análisis.", "ok");
+      } catch (error) { settingsStatus("❌ " + error.message, "err"); }
+    }
+    async function deleteProject() {
+      const p = pilot();
+      if (!p || p.is_sample) return;
+      if (!confirm(`¿Borrar «${p.name}» y todo lo revisado en él?`)) return;
+      const files = p.source_type !== "local" && confirm("¿Borrar también sus archivos subidos o descargados? (Cancelar = conservarlos)");
+      try {
+        const r = await fetch(`/api/projects/${p.key}?delete_files=${files}`, { method: "DELETE" });
+        if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+        state.key = null;
+        await loadPilots();
+        if (pilot()) { showJob(pilot().job); await loadReview(); } else { await loadReview(); }
+      } catch (error) { settingsStatus("❌ No se ha podido borrar: " + error.message, "err"); }
     }
     async function selectPilot(key) {
       state.key = key; state.review = null; state.open.clear(); state.limit = PAGE; state.filter = "all";
       renderTabs();
+      renderSettings();
       showJob(pilot().job);
       await loadReview();
     }
     function showJob(job) {
       const running = job && job.state === "running";
-      $("runBtn").disabled = running;
+      $("runBtn").disabled = running || !pilot();
       $("progress").classList.toggle("hidden", !running);
       const status = $("runStatus");
       status.className = "run-status" + (job && job.state === "done" ? " ok" : job && job.state === "error" ? " err" : "");
       if (!job || job.state === "idle") {
         const p = pilot();
-        status.textContent = p && p.loaded ? "Proyecto ya analizado. Puedes revisarlo o relanzar el análisis." : "Este proyecto aún no se ha analizado: pulsa «Lanzar análisis».";
+        status.textContent = !p ? "Crea un proyecto para empezar." : p.loaded ? "Proyecto ya analizado. Puedes revisarlo o relanzar el análisis." : "Este proyecto aún no se ha analizado: pulsa «Lanzar análisis».";
       } else if (running) {
         $("progressBar").style.width = Math.round((job.fraction || 0) * 100) + "%";
         status.textContent = job.step ? `Paso ${job.step} de ${job.steps} · ${job.message}` : job.message;
@@ -522,14 +606,14 @@
     }
     async function launch() {
       try {
-        const job = await api(`/ui/pilots/${state.key}/run?reread=${$("reread").checked}`, { method: "POST" });
+        const job = await api(`/projects/${state.key}/run?reread=${$("reread").checked}`, { method: "POST" });
         showJob(job);
       } catch (error) { showJob({ state: "error", message: error.message }); }
     }
     async function pollJob() {
       const key = state.key;
       let job;
-      try { job = await api(`/ui/pilots/${key}/run`); } catch (error) { return; }
+      try { job = await api(`/projects/${key}/run`); } catch (error) { return; }
       if (key !== state.key) return;
       if (job.state !== "running") {
         clearInterval(state.poll); state.poll = null;
@@ -541,51 +625,58 @@
       }
     }
 
-    /* ---------- Google Drive ---------- */
-    function renderDriveBox(data) {
-      const select = $("driveDonor");
-      if (!select.options.length) {
-        select.innerHTML = data.donors.map((d) => `<option value="${esc(d.value)}">Donante: ${esc(d.label)}</option>`).join("");
-      }
-      const ok = data.drive.available && data.data_dir_available;
-      $("driveBtn").disabled = !ok;
-      if (!state.driveMessage) {
-        const status = $("driveStatus");
-        status.className = "run-status" + (ok ? "" : " err");
-        status.textContent = ok ? "Listo para conectar." : "⚠️ " + (data.data_dir_available ? data.drive.message : "DATA_DIR no está definido.");
-      }
+    /* ---------- nuevo proyecto: subida o Google Drive ---------- */
+    function setSource(source) {
+      state.source = source;
+      $("srcUploadBtn").classList.toggle("active", source === "upload");
+      $("srcDriveBtn").classList.toggle("active", source === "drive");
+      $("uploadFields").classList.toggle("hidden", source !== "upload");
+      $("driveFields").classList.toggle("hidden", source !== "drive");
+      const s = state.settings;
+      if (!s) return;
+      let problem = !s.data_dir_available ? "DATA_DIR no está definido." : "";
+      if (!problem && source === "drive" && !s.drive.available) problem = s.drive.message;
+      $("createBtn").disabled = Boolean(problem);
+      createStatus(problem ? "⚠️ " + problem : source === "drive" ? "Pega el enlace de la carpeta." : "Elige el informe y los justificantes.", problem ? "err" : "");
     }
-    function driveStatus(message, kind) {
-      state.driveMessage = true;
-      $("driveStatus").className = "run-status" + (kind ? " " + kind : "");
-      $("driveStatus").textContent = message;
+    function createStatus(message, kind) {
+      $("createStatus").className = "run-status" + (kind ? " " + kind : "");
+      $("createStatus").textContent = message;
     }
-    async function connectDrive() {
-      const body = { url: $("driveUrl").value, title: $("driveTitle").value, donor: $("driveDonor").value, report: $("driveReport").value };
-      if (!body.url.trim()) { driveStatus("⚠️ Pega el enlace de la carpeta de Drive.", "err"); return; }
-      $("driveBtn").disabled = true;
-      driveStatus("Comprobando el acceso a la carpeta…");
+    async function createProject() {
+      const name = $("newName").value.trim();
+      if (!name) { createStatus("⚠️ Pon un nombre al proyecto.", "err"); return; }
+      const common = { name, donor: $("newDonor").value, start_date: $("newStart").value || null, end_date: $("newEnd").value || null, llm_mode: $("newLlm").value };
+      $("createBtn").disabled = true;
       try {
-        const created = await api("/ui/drive/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-        driveStatus(`✅ Carpeta «${created.folder_name}» conectada. Pulsa «Lanzar análisis» para descargarla y analizarla.`, "ok");
-        for (const id of ["driveUrl", "driveTitle", "driveReport"]) $(id).value = "";
+        let created;
+        if (state.source === "drive") {
+          if (!$("driveUrl").value.trim()) throw new Error("Pega el enlace de la carpeta de Drive.");
+          createStatus("Comprobando el acceso a la carpeta…");
+          created = await api("/projects", {
+            method: "POST", headers: { "Content-Type": "application/json" },
+            body: JSON.stringify({ ...common, source_type: "drive", drive_url: $("driveUrl").value, report_file: $("driveReport").value || null }),
+          });
+        } else {
+          const report = $("newReport").files[0];
+          const docs = Array.from($("newDocs").files);
+          if (!report) throw new Error("Elige el Excel del informe económico.");
+          if (!docs.length) throw new Error("Elige los justificantes (PDF o un .zip).");
+          const form = new FormData();
+          for (const [k, v] of Object.entries(common)) if (v) form.append(k, v);
+          form.append("report", report);
+          for (const d of docs) form.append("documents", d);
+          createStatus(`Subiendo ${docs.length} archivo(s)…`);
+          created = await api("/projects/upload", { method: "POST", body: form });
+        }
+        createStatus(`✅ Proyecto «${created.name}» creado. Pulsa «Lanzar análisis».`, "ok");
+        for (const id of ["newName", "newStart", "newEnd", "driveUrl", "driveReport", "newReport", "newDocs"]) $(id).value = "";
         await loadPilots();
         await selectPilot(created.key);
       } catch (error) {
-        driveStatus("❌ " + error.message, "err");
+        createStatus("❌ " + error.message, "err");
       }
-      $("driveBtn").disabled = false;
-    }
-    async function disconnectDrive() {
-      const p = pilot();
-      if (!p || !p.drive || !confirm(`¿Quitar «${p.title}» de la lista? Los archivos descargados y lo revisado se conservan.`)) return;
-      try {
-        const r = await fetch(`/api/ui/drive/projects/${p.key}`, { method: "DELETE" });
-        if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
-        state.key = null;
-        await loadPilots();
-        if (pilot()) { showJob(pilot().job); await loadReview(); }
-      } catch (error) { fatal("No se ha podido quitar la conexión: " + error.message); }
+      $("createBtn").disabled = false;
     }
 
     /* ---------- datos del proyecto ---------- */
@@ -594,9 +685,9 @@
       const loaded = p && p.loaded;
       for (const id of ["step2", "step3", "step4", "excelBtn"]) $(id).classList.toggle("hidden", !loaded);
       if (!loaded) return;
-      $("excelBtn").href = `/api/ui/pilots/${state.key}/report.xlsx`;
+      $("excelBtn").href = `/api/projects/${state.key}/report.xlsx`;
       try {
-        const [review, budget] = await Promise.all([api(`/ui/pilots/${state.key}/review`), api(`/ui/pilots/${state.key}/budget`)]);
+        const [review, budget] = await Promise.all([api(`/projects/${state.key}/review`), api(`/projects/${state.key}/budget`)]);
         state.review = review;
         fatal("");
         renderRules(review.rules);
@@ -753,7 +844,7 @@
           ${d.reason ? `<div style="font-size:12.5px; color:#334155;">${esc(d.reason)}</div>` : ""}
           ${d.openable ? `<div style="display:flex; gap:6px; flex-wrap:wrap;">
               <button class="pdf-open-link" onclick="openViewer(${d.id}, ${seg ? seg.pagina_inicio : 1})">👁 Ver ${seg ? "pág. " + seg.pagina_inicio : "documento"}</button>
-              <a class="pdf-open-link sec" href="/api/ui/documents/${d.id}/file" target="_blank" rel="noopener">🔗 Abrir PDF original (${d.pages || "?"} págs.)</a></div>`
+              <a class="pdf-open-link sec" href="/api/documents/${d.id}/file" target="_blank" rel="noopener">🔗 Abrir PDF original (${d.pages || "?"} págs.)</a></div>`
             : `<div class="step-sub">No se puede previsualizar (no es un PDF, está dentro de un .zip o no está en DATA_DIR).</div>`}
         </div>`;
       }).join("")
@@ -864,7 +955,7 @@
     function openViewer(documentId, page, exactPage) {
       state.viewer = { doc: documentId, page: page || 1, pages: null, rotation: 0, url: null };
       $("viewerTitle").textContent = "📄 " + documentName(documentId);
-      $("viewerOpen").href = `/api/ui/documents/${documentId}/file`;
+      $("viewerOpen").href = `/api/documents/${documentId}/file`;
       $("viewerNote").textContent = exactPage ? `La incidencia apunta a la página ${page}.` : "";
       $("viewer").classList.add("show");
       loadPage();
@@ -878,7 +969,7 @@
       const v = state.viewer;
       $("viewerPage").textContent = "Cargando…";
       try {
-        const r = await fetch(`/api/ui/documents/${v.doc}/page/${v.page}.png?rotation=${v.rotation}`);
+        const r = await fetch(`/api/documents/${v.doc}/page/${v.page}.png?rotation=${v.rotation}`);
         if (!r.ok) { let d = r.statusText; try { d = (await r.json()).detail || d; } catch (e) { /* not JSON */ } throw new Error(d); }
         v.pages = Number(r.headers.get("X-Pages")) || v.pages;
         if (v.url) URL.revokeObjectURL(v.url);
@@ -902,8 +993,9 @@
     /* ---------- arranque ---------- */
     (async function init() {
       try {
+        await loadSettings();
         await loadPilots();
-        if (pilot()) { showJob(pilot().job); await loadReview(); }
+        if (pilot()) { showJob(pilot().job); await loadReview(); } else { showJob(null); }
       } catch (error) {
         fatal("No hay conexión con el servidor o con PostgreSQL (" + error.message + "). Arranca la base de datos con «docker compose up -d db».");
       }

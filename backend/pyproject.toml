@@ -18,6 +18,7 @@ dependencies = [
     "rapidfuzz>=3.9",
     "httpx>=0.27",
     "pyyaml>=6.0",
+    "python-multipart>=0.0.9",  # file uploads (FastAPI forms)
 ]
 
 [project.optional-dependencies]
@@ -34,10 +35,6 @@ drive = [
     "google-api-python-client>=2.100",
     "google-auth>=2.20",
     "google-auth-oauthlib>=1.0",
-]
-# Review app (ui/streamlit_app.py).
-ui = [
-    "streamlit>=1.40",
 ]
 
 [build-system]

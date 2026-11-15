@@ -1,8 +1,10 @@
 """Per-project configuration of the document <-> expense matching.
 
 Nothing donor- or project-specific lives in the matching logic: prefixes, number overrides,
-files to ignore and expense types that need no receipt are all declared here. Add an entry to
-`MATCH_CONFIG_BY_PROJECT` (keyed by `project.code`) to override the donor default.
+files to ignore and expense types that need no receipt are configuration. Each donor has a
+generic default here (`DONOR_DEFAULTS`); a project overrides any key of it with its own
+`project.match_config` (stored in the database; the sample projects get theirs from
+`app/samples.py`).
 
 A config is a plain dict:
 
@@ -43,109 +45,72 @@ from app.models import Project
 MatchConfig = dict[str, Any]
 
 # "Copia de 12. Factura.pdf" is the same evidence as "12. Factura.pdf".
-_COPY = r"(?:copia\s+de\s+)?"
+COPY_PREFIX = r"(?:copia\s+de\s+)?"
 
-XUNTA_MATCH_CONFIG: MatchConfig = {
-    # Names look like "Nº orden. Concepto Nº factura.pdf".
-    "ignore_files": [r"^informe", r"^anuncio", r"^20\d\d_", r"^gu[ií]a"],
-    "amount_convention": "comma_thousands",
-    "default_currency": "UGX",
-    "zip_members_use_archive_name": True,
-    "no_document_partidas": ["B"],
-    "carpeta_completa": True,
-    "name_reconciler": {
-        # Voucher numbers of JRS Uganda: EB UGA04 602, FP UGA04 108, CV UGA04-113, EBUGA04-060...
-        "reference_pattern": (
-            r"(?<![A-Z])(?P<prefijo>[A-Z]{2}(?:\s*CAM)?)"
-            r"[\s\-_]*UGA\d{2}[\s\-_]*(?P<numero>\d+)"
-        ),
-        "long_numbers": True,  # any 5+ digit number is an invoice number (46681)
-        # Manual order number at the start of the name: "1. ", "10.A ", "49A ", "33-39 "
-        "hide_order": (
-            r"^(?P<desde>\d+)(?:-(?P<hasta>\d+))?"
-            r"(?:\.?\s?(?P<sufijo>[A-Za-z])(?=[\s._]))?(?=[\s.])\.?"
-        ),
-        "params": {"late_month_concepts": ["nssf", "pension", "seguro medico"]},
-        "synonyms": {
-            "salario": ["nomina", "payroll", "salary", "wage"],
-            "seguro": ["insurance"],
-            "combustible": ["fuel"],
-            "vehiculo": ["motocicleta", "moto", "vehicle"],
-            "refrigerio": ["aperitivo", "snack"],
-            "comision": ["fee", "charge"],
-        },
+# Order numbers written at the start of a file name, the usual convention in Spanish public
+# donors' justifications: "12. Factura", "69.A Combustible", "33-39 Nóminas".
+ORDER_NUMBER_RULES: list[dict[str, Any]] = [
+    {
+        "name": "range",  # "33-39 Salario bruto ..." -> orders 33..39
+        "kind": "range",
+        "regex": rf"^\s*{COPY_PREFIX}(?P<a>\d+)\s*-\s*(?P<b>\d+)(?=\s|\.|$)",
+        "max_number": 999,  # "2024-2025 ..." is a year range, not orders
     },
-    "filename_rules": [
-        {
-            "name": "range",  # "33-39 Salario bruto ..." -> orders 33..39
-            "kind": "range",
-            "regex": rf"^\s*{_COPY}(?P<a>\d+)\s*-\s*(?P<b>\d+)(?=\s|\.|$)",
-            "max_number": 999,  # "2024-2025 ..." is a year range, not orders
-        },
-        {
-            "name": "number_with_suffix",  # "69.A Combustible", "49A Estancia", "10.A Fondo"
-            "kind": "number",
-            "regex": rf"^\s*{_COPY}(?P<n>\d+)\.?(?P<suffix>[A-Za-z])(?=[\s._-]|$)",
-        },
-        {
-            "name": "number",  # "12. Fondo pensiones", "5 Material"; not "2024_guia"
-            "kind": "number",
-            "regex": rf"^\s*{_COPY}(?P<n>\d+)(?=\s|\.|$)",
-        },
-    ],
+    {
+        "name": "number_with_suffix",  # "69.A Combustible", "49A Estancia", "10.A Fondo"
+        "kind": "number",
+        "regex": rf"^\s*{COPY_PREFIX}(?P<n>\d+)\.?(?P<suffix>[A-Za-z])(?=[\s._-]|$)",
+    },
+    {
+        "name": "number",  # "12. Fondo pensiones", "5 Material"; not "2024_guia"
+        "kind": "number",
+        "regex": rf"^\s*{COPY_PREFIX}(?P<n>\d+)(?=\s|\.|$)",
+    },
+]
+
+# Manual order number at the start of a name ("1. ", "10.A ", "49A ", "33-39 "), hidden by the
+# name-based conciliador before comparing (it is the work a person already did).
+HIDE_ORDER_NUMBER = (
+    r"^(?P<desde>\d+)(?:-(?P<hasta>\d+))?(?:\.?\s?(?P<sufijo>[A-Za-z])(?=[\s._]))?(?=[\s.])\.?"
+)
+
+# Words that name the same thing in Spanish / English justifications.
+COMMON_SYNONYMS: dict[str, list[str]] = {
+    "salario": ["nomina", "payroll", "salary", "wage"],
+    "seguro": ["insurance"],
+    "combustible": ["fuel", "gasolina", "diesel"],
+    "vehiculo": ["motocicleta", "moto", "vehicle"],
+    "refrigerio": ["aperitivo", "snack"],
+    "comision": ["fee", "charge"],
 }
 
-AECID_MATCH_CONFIG: MatchConfig = {
-    # Order numbers carry a prefix: CG = CEPAG, FA = Fe y Alegría, EC = Entreculturas.
-    "ignore_files": [r"^informe"],
-    "amount_convention": "dot_thousands",
-    "default_currency": "PYG",
+_BASE: MatchConfig = {
+    "ignore_files": [r"^informe", r"^anuncio", r"^gu[ií]a", r"^bases"],
+    "amount_convention": "auto",
+    "default_currency": None,
     "zip_members_use_archive_name": True,
-    "no_document_partidas": ["B"],
-    "carpeta_completa": False,  # the folder is a sample: 17 PDFs for 1.321 expenses
-    "filename_rules": [
-        {
-            "name": "contract_yvy_pora",  # the contract backs every payment to that supplier
-            "kind": "issuer",
-            "regex": r"^\s*contrato\s+y[bv]y\s*pora",
-            "issuer_query": "Yvy Pora",
-            "min_score": 85,
-        },
-        {
-            "name": "orden_cg",  # "ORDEN 14.PDF", "Orden N°113.PDF" -> CG14, CG113(.x)
-            "kind": "number",
-            "regex": r"^\s*orden\s*(?:n\s*[°º.]?\s*)?(?P<n>\d+)",
-            "prefix": "CG",
-            "subnumbers": True,
-        },
-        {
-            "name": "number_only",  # "153.pdf" -> FA153(.x); 163_PAGO..., 164_... -> CG
-            "kind": "number",
-            "regex": r"^\s*(?P<n>\d+)(?=[\s._-]|$)",
-            "prefix": "FA",
-            "prefix_by_number": {"163": "CG", "164": "CG"},
-            "subnumbers": True,
-        },
-    ],
+    "no_document_partidas": ["B"],  # indirect costs: accredited with a certificate
+    "carpeta_completa": True,
+    "filename_rules": ORDER_NUMBER_RULES,
+    # Name-based conciliador (proposes documents; the content verifies). Without a
+    # `reference_pattern` it compares concept and month; projects add theirs.
+    "name_reconciler": {
+        "long_numbers": True,
+        "hide_order": HIDE_ORDER_NUMBER,
+        "synonyms": COMMON_SYNONYMS,
+    },
 }
 
-# Explicit config per project (key = project.code); wins over the donor default.
-MATCH_CONFIG_BY_PROJECT: dict[str, MatchConfig] = {
-    "24-UG-226": XUNTA_MATCH_CONFIG,
-    "22-PY-136": AECID_MATCH_CONFIG,
-}
-
-MATCH_CONFIG_BY_DONOR: dict[Donor, MatchConfig] = {
-    Donor.XUNTA: XUNTA_MATCH_CONFIG,
-    Donor.AECID: AECID_MATCH_CONFIG,
+# Generic default per donor: what any project of that donor gets unless it overrides a key.
+DONOR_DEFAULTS: dict[Donor, MatchConfig] = {
+    Donor.XUNTA: {**_BASE},
+    Donor.AECID: {**_BASE},
 }
 
 
 def get_match_config(project: Project) -> MatchConfig:
-    """Config for a project: by project code, falling back to its donor's default."""
-    if project.code and project.code in MATCH_CONFIG_BY_PROJECT:
-        return MATCH_CONFIG_BY_PROJECT[project.code]
-    return MATCH_CONFIG_BY_DONOR[project.donor]
+    """The donor's default config with the project's overrides applied (top-level keys)."""
+    return {**DONOR_DEFAULTS[project.donor], **(project.match_config or {})}
 
 
 # --- classification of expenses that need no receipt in the donor folder ----------------

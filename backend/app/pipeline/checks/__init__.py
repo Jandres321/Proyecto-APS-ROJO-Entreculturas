@@ -41,9 +41,9 @@ from app.pipeline.checks.context import (
 )
 from app.pipeline.checks.documents import check_documents
 from app.pipeline.checks.duplicates import check_duplicates
-from app.pipeline.match import _sync_findings
 from app.rules import CHECK_CODES
 from app.schemas import FindingIn
+from app.services.findings import sync_findings
 
 __all__ = [
     "FIELD_LABELS_ES",
@@ -73,6 +73,6 @@ def run_checks(session: Session, project_id: int) -> list[FindingIn]:
     keeping the reviewer's decisions (accepted / false positive)."""
     ctx = build_context(session, project_id)
     findings = check_documents(ctx) + check_file_completeness(ctx) + check_duplicates(ctx)
-    _sync_findings(session, project_id, set(CHECK_CODES), findings)
+    sync_findings(session, project_id, set(CHECK_CODES), findings)
     session.commit()
     return findings

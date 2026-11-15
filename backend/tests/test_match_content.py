@@ -8,7 +8,7 @@ from sqlalchemy import select
 from app.enums import Confidence, MatchMethod, TipoSegmento
 from app.models import Document, ExpenseDocument, ExpenseSegment, Finding, Segmento
 from app.pipeline import match_content as mc
-from app.pipeline.match_config import XUNTA_MATCH_CONFIG
+from app.samples import UGANDA_MATCH_CONFIG
 from tests.test_match_pipeline import add_expense, new_project
 
 D = dt.date
@@ -225,7 +225,7 @@ def test_weak_name_signal_adds_at_most_its_weight():
 def test_name_claims_come_from_the_filename_rules():
     expenses = [exp(33, 1, order_key="33"), exp(34, 1, order_key="34"), exp(70, 1, order_key="70")]
     names = {"p": ["33-34 Salarios.pdf"], "q": ["70. Combustible.pdf"], "r": ["Sin numero.pdf"]}
-    assert mc.compute_name_claims(expenses, names, XUNTA_MATCH_CONFIG) == {
+    assert mc.compute_name_claims(expenses, names, UGANDA_MATCH_CONFIG) == {
         (33, "p"),
         (34, "p"),
         (70, "q"),

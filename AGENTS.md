@@ -5,8 +5,8 @@ Este archivo lo leen automáticamente Codex, Cursor, GitHub Copilot, Gemini CLI 
 ## Antes de nada
 El repositorio tiene dos piezas (ver `CLAUDE.md`, «Repositorio integrado»):
 
-- **Revisor de justificación** (`backend/`, `frontend/`): la aplicación. Su documentación es `README.md` y `CLAUDE.md`. Código en inglés, textos al usuario en español.
-- **Conciliador** (`src/conciliador/`, `config/`, `tests/`): el programa de línea de comandos. Su documentación es `docs/conciliador.md`. Código en español.
+- **Revisor de justificación** (`backend/`): la aplicación. Su documentación es `README.md` y `CLAUDE.md`. Código en inglés, textos al usuario en español.
+- **Conciliador** (`src/conciliador/`, `config/`, `tests/`): el programa de línea de comandos, **legado**: se conserva como referencia y ya no se mantiene (su cruce está portado a `backend/app/pipeline/conciliador.py`, que es la versión que evoluciona). Su documentación es `docs/conciliador.md`. Código en español.
 
 Para trabajar en el **conciliador**:
 1. **Lee `docs/conciliador.md` entero.** Es su fuente de verdad: el reto, los datos, la estructura, cómo funciona el código, la configuración, los resultados, las decisiones y la hoja de ruta.
@@ -25,7 +25,7 @@ Para trabajar en el **conciliador**:
 - **No envíes documentos de `TUM_SociAI/` a servicios externos** (APIs de IA, webs) sin la aprobación explícita del equipo. Entreculturas aún no ha confirmado qué proveedor se puede usar.
 - **Lo específico de un proyecto va en su YAML**, no en el código.
 - **El nº de orden manual nunca se usa para cruzar**, solo para validar (ver `docs/conciliador.md`, sección 10).
-- Idioma: en el conciliador (`src/`, `config/`, `tests/`), el código, los comentarios, los mensajes y la documentación van en **español**. En `backend/` y `frontend/`, código y comentarios en inglés y textos al usuario en español.
+- Idioma: en el conciliador (`src/`, `config/`, `tests/`), el código, los comentarios, los mensajes y la documentación van en **español**. En `backend/`, código y comentarios en inglés y textos al usuario en español.
 
 ## Al terminar cualquier cambio en el conciliador
 1. Ejecuta `python -m pytest` en la raíz y que pase.

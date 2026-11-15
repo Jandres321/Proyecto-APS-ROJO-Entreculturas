@@ -16,7 +16,6 @@ from app.enums import (
     Donor,
     FindingStatus,
     MatchMethod,
-    ProjectStatus,
     RuleKind,
     Severity,
 )
@@ -47,24 +46,6 @@ class HealthOut(BaseModel):
 
 
 # --- Project ----------------------------------------------------------------
-
-
-class ProjectIn(BaseModel):
-    name: str = Field(max_length=200)
-    donor: Donor
-    code: str | None = Field(default=None, max_length=50)
-    currency: str = Field(default="EUR", min_length=3, max_length=3)
-
-
-class ProjectOut(OrmModel):
-    id: int
-    name: str
-    donor: Donor
-    code: str | None
-    currency: str
-    created_at: dt.datetime
-    status: ProjectStatus
-    progress: int
 
 
 # --- Budget -----------------------------------------------------------------

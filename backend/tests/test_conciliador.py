@@ -6,10 +6,10 @@ import pytest
 
 from app.enums import Confidence
 from app.pipeline import conciliador as c
-from app.pipeline.match_config import XUNTA_MATCH_CONFIG
 from app.pipeline.match_content import ExpenseView
+from app.samples import UGANDA_MATCH_CONFIG
 
-CONFIG = XUNTA_MATCH_CONFIG["name_reconciler"]
+CONFIG = UGANDA_MATCH_CONFIG["name_reconciler"]
 D = dt.date
 
 

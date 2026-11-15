@@ -1,17 +1,26 @@
-"""Web review app: the static page, the expense-centred view and the /api/ui routes, on invented
+"""Web review app: the static page, the expense-centred view and the project API, on invented
 data (database tests are rolled back and skipped without PostgreSQL)."""
 
-import threading
-import time
+import io
+import zipfile
 from decimal import Decimal
 from pathlib import Path
 from types import SimpleNamespace
 
 import pytest
 
-from app.api import ui
-from app.enums import Confidence, Donor, FindingStatus, MatchMethod, Severity, TipoSegmento
+from app.enums import (
+    Confidence,
+    Donor,
+    FindingStatus,
+    JobState,
+    MatchMethod,
+    Severity,
+    SourceType,
+    TipoSegmento,
+)
 from app.models import (
+    AnalysisJob,
     Document,
     Expense,
     ExpenseDocument,
@@ -20,25 +29,12 @@ from app.models import (
     Project,
     Segmento,
 )
-from app.pipeline.run import PilotProject
+from app.pipeline.match_content import ContentMatchSummary
+from app.pipeline.run import RunSummary
 from app.review import MISSING, NOT_REQUIRED_INDIRECT, VERIFIED, DocumentStatus
 from app.review_view import expense_verdict, project_review
 
 D = Decimal
-TEST_PILOT = PilotProject("web", "Proyecto web de prueba", Donor.XUNTA, "WEB-1", "carpeta", "i.xls")
-
-
-@pytest.fixture
-def pilots(monkeypatch, tmp_path):
-    from app import projects
-    from app.config import get_settings
-
-    monkeypatch.setattr(projects, "PILOTS", {TEST_PILOT.key: TEST_PILOT})
-    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)  # no connected Drive folders
-    monkeypatch.setattr(ui, "_jobs", {})
-    return TEST_PILOT
-
-
 # --- the page ---
 
 
@@ -82,7 +78,15 @@ def test_verdict_comes_from_the_document_status_and_the_findings():
 
 @pytest.fixture
 def project(db_session) -> Project:
-    project = Project(name="web test", donor=Donor.XUNTA, code=TEST_PILOT.code)
+    project = Project(
+        key="web",
+        name="web test",
+        donor=Donor.XUNTA,
+        code="WEB-1",
+        source_type=SourceType.LOCAL,
+        folder="carpeta",
+        report_file="i.xls",
+    )
     db_session.add(project)
     db_session.flush()
     return project
@@ -232,47 +236,131 @@ def test_the_report_has_one_row_per_expense_with_what_was_really_read(
     assert summary["   · Desviación respecto al presupuesto"] == 1
 
 
-# --- /api/ui (database) ---
+# --- project API (database) ---
 
 
-@pytest.fixture
-def api(db_session, client):
-    from app.db import get_session
-    from app.main import app
-
-    app.dependency_overrides[get_session] = lambda: db_session
-    yield client
-    app.dependency_overrides.clear()
+def test_settings_tell_the_page_what_is_available(client):
+    data = client.get("/api/settings").json()
+    assert {d["value"] for d in data["donors"]} == {"xunta", "aecid"}
+    assert {m["value"] for m in data["llm_modes"]} == {"off", "dudosas", "todas"}
+    assert set(data["drive"]) == {"available", "message"}
+    assert isinstance(data["external_llm"], bool)
 
 
-def test_api_serves_pilots_review_budget_and_excel(db_session, project, pilots, api):
+def test_api_serves_projects_review_budget_and_excel(db_session, project, api):
     fill(db_session, project)
 
-    listing = api.get("/api/ui/pilots").json()
-    (pilot,) = listing["pilots"]
-    assert (pilot["key"], pilot["expenses"], pilot["loaded"]) == ("web", 2, True)
-    assert pilot["job"] == {"state": "idle"} and pilot["drive"] is False
-    assert {d["value"] for d in listing["donors"]} == {"xunta", "aecid"}
-    assert set(listing["drive"]) == {"available", "message"}
+    listing = api.get("/api/projects").json()
+    (shown,) = [p for p in listing if p["key"] == "web"]
+    assert (shown["expenses"], shown["loaded"], shown["source_type"]) == (2, True, "local")
+    assert shown["job"] == {"state": "idle"} and shown["llm_mode"] == "off"
 
-    review = api.get("/api/ui/pilots/web/review").json()
+    review = api.get("/api/projects/web/review").json()
     assert len(review["expenses"]) == 2 and "rules" in review
-    assert set(api.get("/api/ui/pilots/web/budget").json()) == {"partidas", "limits"}
+    assert set(api.get("/api/projects/web/budget").json()) == {"partidas", "limits"}
 
-    excel = api.get("/api/ui/pilots/web/export.xlsx")
+    excel = api.get("/api/projects/web/export.xlsx")
     assert excel.status_code == 200 and excel.content[:2] == b"PK"
     assert "WEB-1_revision.xlsx" in excel.headers["content-disposition"]
-    report = api.get("/api/ui/pilots/web/report.xlsx")
+    report = api.get("/api/projects/web/report.xlsx")
     assert report.status_code == 200 and report.content[:2] == b"PK"
     assert "WEB-1_informe_analisis_" in report.headers["content-disposition"]
 
-    assert api.get("/api/ui/pilots/otro/review").status_code == 404
+    assert api.get("/api/projects/otro/review").status_code == 404
 
 
-def test_a_pilot_that_was_never_analysed_is_not_loaded(db_session, pilots, api):
-    (pilot,) = api.get("/api/ui/pilots").json()["pilots"]
-    assert pilot["loaded"] is False
-    assert api.get("/api/ui/pilots/web/review").status_code == 404
+def test_a_project_that_was_never_analysed_is_not_loaded(db_session, project, api):
+    assert api.get("/api/projects/web").json()["loaded"] is False
+    assert api.get("/api/projects/web/review").status_code == 404
+
+
+def test_settings_of_a_project_can_be_changed(db_session, project, api):
+    changed = api.patch(
+        "/api/projects/web",
+        json={"start_date": "2024-06-01", "end_date": "2024-12-31", "llm_mode": "dudosas"},
+    ).json()
+    assert (changed["start_date"], changed["end_date"], changed["llm_mode"]) == (
+        "2024-06-01",
+        "2024-12-31",
+        "dudosas",
+    )
+    backwards = api.patch("/api/projects/web", json={"end_date": "2024-01-01"})
+    assert backwards.status_code == 400 and "anterior" in backwards.json()["detail"]
+    cleared = api.patch("/api/projects/web", json={"start_date": None, "end_date": None}).json()
+    assert cleared["start_date"] is None
+
+
+def test_sample_projects_cannot_be_deleted(db_session, project, api):
+    project.is_sample = True
+    db_session.flush()
+    refused = api.delete("/api/projects/web")
+    assert refused.status_code == 400 and "ejemplo" in refused.json()["detail"]
+
+
+def _zip(**files: bytes) -> bytes:
+    buffer = io.BytesIO()
+    with zipfile.ZipFile(buffer, "w") as zf:
+        for name, content in files.items():
+            zf.writestr(name, content)
+    return buffer.getvalue()
+
+
+def test_a_project_can_be_created_by_uploading_its_files(data_root, api):
+    response = api.post(
+        "/api/projects/upload",
+        data={"name": "Proyecto subido", "donor": "aecid", "start_date": "2023-02-01"},
+        files=[
+            ("report", ("Informe final.xlsx", b"PK-fake", "application/octet-stream")),
+            ("documents", ("1. Factura.pdf", b"%PDF-1", "application/pdf")),
+            (
+                "documents",
+                ("lote.zip", _zip(**{"sub/2. Recibo.pdf": b"%PDF-2"}), "application/zip"),
+            ),
+        ],
+    )
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert (created["key"], created["source_type"], created["report_file"]) == (
+        "proyecto-subido",
+        "upload",
+        "Informe final.xlsx",
+    )
+    assert created["saved"] == {"documentos": 2, "informe": 1}
+    folder = data_root / "_proyectos" / "proyecto-subido"
+    assert (folder / "Informe final.xlsx").is_file()
+    assert (folder / "justificantes" / "1. Factura.pdf").is_file()
+    assert (folder / "justificantes" / "sub" / "2. Recibo.pdf").is_file()
+    assert not (folder / "justificantes" / "lote.zip").exists()  # unpacked
+
+    more = api.post(
+        "/api/projects/proyecto-subido/files",
+        files=[("documents", ("3. Nomina.pdf", b"%PDF-3", "application/pdf"))],
+    )
+    assert more.json()["saved"] == {"documentos": 1, "informe": 0}
+
+    assert (
+        api.delete("/api/projects/proyecto-subido", params={"delete_files": True}).status_code
+        == 204
+    )
+    assert not folder.exists()
+
+
+def test_uploads_are_validated(data_root, api):
+    def upload(report_name, doc_name, doc=b"%PDF"):
+        return api.post(
+            "/api/projects/upload",
+            data={"name": "X", "donor": "xunta"},
+            files=[
+                ("report", (report_name, b"x", "application/octet-stream")),
+                ("documents", (doc_name, doc, "application/octet-stream")),
+            ],
+        )
+
+    assert "Excel" in upload("informe.pdf", "a.pdf").json()["detail"]
+    assert "no admitido" in upload("informe.xlsx", "virus.exe").json()["detail"]
+    escape = upload("informe.xlsx", "malo.zip", _zip(**{"../../fuera.pdf": b"x"}))
+    assert escape.status_code == 400 and "rutas no válidas" in escape.json()["detail"]
+    assert not (data_root.parent / "fuera.pdf").exists()
 
 
 def test_pdf_pages_are_rendered_only_for_files_inside_data_dir(
@@ -302,81 +390,75 @@ def test_pdf_pages_are_rendered_only_for_files_inside_data_dir(
 
     inside, outside, sheet = add("carpeta/f.pdf"), add("../secreto.pdf"), add("carpeta/x.xlsx")
 
-    page = api.get(f"/api/ui/documents/{inside}/page/2.png", params={"rotation": 180})
+    page = api.get(f"/api/documents/{inside}/page/2.png", params={"rotation": 180})
     assert page.status_code == 200 and page.content[:4] == b"\x89PNG"
     assert page.headers["x-pages"] == "3"
-    assert api.get(f"/api/ui/documents/{inside}/page/99.png").status_code == 200  # clamped
-    original = api.get(f"/api/ui/documents/{inside}/file")
+    assert api.get(f"/api/documents/{inside}/page/99.png").status_code == 200  # clamped
+    original = api.get(f"/api/documents/{inside}/file")
     assert original.status_code == 200 and original.content[:4] == b"%PDF"
 
     # a path that escapes DATA_DIR, a file that is not a PDF and an unknown document
     for document_id in (outside, sheet, 0):
-        assert api.get(f"/api/ui/documents/{document_id}/page/1.png").status_code == 404
-        assert api.get(f"/api/ui/documents/{document_id}/file").status_code == 404
+        assert api.get(f"/api/documents/{document_id}/page/1.png").status_code == 404
+        assert api.get(f"/api/documents/{document_id}/file").status_code == 404
 
 
-# --- launching the pipeline (no database) ---
-
-
-class FakeSession:
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *args):
-        return False
+# --- launching the pipeline (database) ---
 
 
 def summary():
-    matching = SimpleNamespace(
-        expenses_linked=3, verified=1, from_name=2, from_content=0, not_in_sample=0
-    )
-    return SimpleNamespace(expenses=5, documents=4, matching=matching, report_reread=True)
+    matching = ContentMatchSummary(expenses_linked=3, verified=1, from_name=2, from_content=0)
+    return RunSummary(project_id=0, expenses=5, documents=4, matching=matching, report_reread=True)
 
 
-def wait_for(client, state):
-    for _ in range(200):
-        job = client.get("/api/ui/pilots/web/run").json()
-        if job["state"] == state:
-            return job
-        time.sleep(0.02)
-    raise AssertionError(f"the run never reached {state!r}: {job}")
+def fraction_seen(session, project):
+    session.expire_all()
+    return sync_state(session, project)
 
 
-def test_launching_runs_in_the_background_and_reports_progress(pilots, client, monkeypatch):
-    release = threading.Event()
-    calls = []
+def sync_state(session, project):
+    from app.services.jobs import latest_job
 
-    def fake_pipeline(session, pilot, *, reread_report, on_progress):
-        calls.append((pilot.key, reread_report))
+    return latest_job(session, project).state.value
+
+
+def test_a_run_is_persisted_with_its_progress_and_outcome(
+    db_session, project, api, sync_jobs, data_root, monkeypatch
+):
+    (data_root / "carpeta").mkdir()
+    progress = []
+
+    def fake_pipeline(session, proj, *, reread_report, on_progress):
         on_progress("reading", 0.5, "Leyendo el contenido de los PDF")
-        release.wait(5)
+        progress.append(fraction_seen(session, proj))
+        assert reread_report is True
         return summary()
 
-    monkeypatch.setattr(ui, "run_pipeline", fake_pipeline)
-    monkeypatch.setattr(ui.db, "SessionLocal", FakeSession)
-
-    started = client.post("/api/ui/pilots/web/run", params={"reread": True})
-    assert started.status_code == 202 and started.json()["state"] == "running"
-    assert client.post("/api/ui/pilots/web/run").status_code == 409  # one run at a time
-    running = wait_for(client, "running")
-    assert running["steps"] == len(ui.STEPS)
-
-    release.set()
-    done = wait_for(client, "done")
-    assert (
-        done["fraction"] == 1.0 and "Análisis terminado: 5 gastos y 4 documentos" in done["message"]
-    )
+    monkeypatch.setattr(sync_jobs, "run_pipeline", fake_pipeline)
+    started = api.post("/api/projects/web/run", params={"reread": True})
+    assert started.status_code == 202
+    assert progress == ["running"]
+    done = api.get("/api/projects/web/run").json()
+    assert done["state"] == "done" and done["fraction"] == 1.0
+    assert "Análisis terminado: 5 gastos y 4 documentos" in done["message"]
     assert "Se ha releído el informe" in done["message"]
-    assert calls == [("web", True)]
-    assert client.post("/api/ui/pilots/otro/run").status_code == 404
+    assert api.post("/api/projects/otro/run").status_code == 404
 
 
-def test_a_failed_run_is_reported_not_hidden(pilots, client, monkeypatch):
-    def missing(session, pilot, **kwargs):
-        raise FileNotFoundError("No se encuentra el informe")
+def test_one_run_at_a_time_and_interrupted_runs_are_closed(db_session, project, api, sync_jobs):
+    running = AnalysisJob(project_id=project.id, state=JobState.RUNNING, steps=7)
+    db_session.add(running)
+    db_session.flush()
+    assert api.post("/api/projects/web/run").status_code == 409
+    assert sync_jobs.mark_interrupted_jobs(db_session) == 1
+    closed = api.get("/api/projects/web/run").json()
+    assert closed["state"] == "error" and "reinició" in closed["message"]
 
-    monkeypatch.setattr(ui, "run_pipeline", missing)
-    monkeypatch.setattr(ui.db, "SessionLocal", FakeSession)
-    assert client.post("/api/ui/pilots/web/run").status_code == 202
-    failed = wait_for(client, "error")
+
+def test_a_failed_run_is_reported_not_hidden(db_session, project, api, sync_jobs, data_root):
+    # the folder exists but the report does not: the pipeline refuses to start
+    (data_root / "carpeta").mkdir()
+    assert api.post("/api/projects/web/run").status_code == 202
+    failed = api.get("/api/projects/web/run").json()
+    assert failed["state"] == "error"
     assert "Faltan datos" in failed["message"] and "DATA_DIR" in failed["message"]
