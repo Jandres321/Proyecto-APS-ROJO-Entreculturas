@@ -94,6 +94,20 @@
     }
     .run-status.ok { background: var(--green-bg); border-color: var(--green-border); color: #14532d; }
     .run-status.err { background: var(--red-bg); border-color: var(--red-border); color: #7f1d1d; }
+    .upload-split { display: grid; grid-template-columns: 1.25fr 1fr; gap: 18px; align-items: start; }
+    @media (max-width: 1000px) { .upload-split { grid-template-columns: 1fr; } }
+    .drive-box {
+      border: 2px dashed #4ade80; background: #f0fdf4; border-radius: 12px; padding: 16px 20px;
+      display: flex; flex-direction: column; gap: 10px;
+    }
+    .drive-box h3 { font-size: 15px; font-weight: 800; color: #0f172a; }
+    .drive-box p { font-size: 13px; color: #475569; }
+    .drive-form { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .drive-form .wide { grid-column: 1 / -1; }
+    .drive-form input, .drive-form select {
+      width: 100%; padding: 8px 10px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 13px;
+      font-family: inherit; background: #fff;
+    }
     .notice {
       font-size: 12.5px; color: #475569; background: #eff6ff; border-left: 4px solid var(--primary);
       padding: 9px 13px; border-radius: 6px;
@@ -285,7 +299,7 @@
     </div>
     <div class="top-actions">
       <span class="pill" id="llmPill" title="">…</span>
-      <a class="btn btn-primary hidden" id="excelBtn" href="#">📥 Descargar Excel revisado</a>
+      <a class="btn btn-primary hidden" id="excelBtn" href="#" title="Resumen, una fila por gasto con su veredicto, lo leído y sus incidencias, presupuesto y topes. Incluye tus decisiones.">📥 Descargar informe Excel</a>
     </div>
   </header>
 
@@ -299,6 +313,7 @@
         <span class="step-sub">El informe económico es la base y se compara con el interior de los PDF</span>
       </div>
       <div class="country-tabs" id="pilotTabs"></div>
+      <div class="upload-split">
       <div class="run-box">
         <div class="run-row">
           <div>
@@ -314,6 +329,24 @@
         </div>
         <div class="progress hidden" id="progress"><div id="progressBar"></div></div>
         <span class="run-status" id="runStatus">Elige un proyecto.</span>
+        <button class="btn btn-sm hidden" id="disconnectBtn" onclick="disconnectDrive()" style="width:fit-content;" title="Quita el proyecto de la lista. Los archivos ya descargados y lo revisado se conservan.">✖ Quitar esta conexión de Drive</button>
+      </div>
+      <div class="drive-box">
+        <div>
+          <h3>☁️ Conectar una carpeta de Google Drive</h3>
+          <p>En vez de copiar los archivos al equipo: pega el enlace de la carpeta con el informe económico y los justificantes. Al lanzar el análisis se descarga solo lo nuevo o lo que haya cambiado.</p>
+        </div>
+        <div class="drive-form">
+          <input class="wide" type="text" id="driveUrl" placeholder="Enlace de la carpeta de Drive (https://drive.google.com/drive/folders/…)" />
+          <input type="text" id="driveTitle" placeholder="Nombre del proyecto" />
+          <select id="driveDonor" title="Decide el formato del informe y las reglas que se aplican"></select>
+          <input class="wide" type="text" id="driveReport" placeholder="Nombre del Excel del informe (opcional: si se deja vacío, se busca)" />
+        </div>
+        <div class="run-row">
+          <button class="btn btn-success" id="driveBtn" onclick="connectDrive()">☁️ Conectar carpeta</button>
+          <span class="run-status" id="driveStatus" style="flex:1;">…</span>
+        </div>
+      </div>
       </div>
       <div class="notice" style="margin-top:12px;" id="localNote">ℹ️ El análisis conserva tus decisiones al relanzarlo.</div>
     </section>
@@ -434,6 +467,8 @@
     async function loadPilots() {
       const data = await api("/ui/pilots");
       state.pilots = data.pilots;
+      state.drive = data.drive;
+      renderDriveBox(data);
       const pill = $("llmPill");
       if (data.external_llm) {
         pill.textContent = `🤖 IA externa activada (${data.llm_provider}${data.llm_model ? " · " + data.llm_model : ""})`;
@@ -455,10 +490,11 @@
     function renderTabs() {
       $("pilotTabs").innerHTML = state.pilots.map((p) => `
         <button class="country-tab ${p.key === state.key ? "active" : ""}" onclick="selectPilot('${esc(p.key)}')">
-          <span>${esc(p.title)}</span><span class="count-pill">${p.loaded ? p.expenses + " gastos" : "sin analizar"}</span>
+          <span>${p.drive ? "☁️ " : ""}${esc(p.title)}</span><span class="count-pill">${p.loaded ? p.expenses + " gastos" : "sin analizar"}</span>
         </button>`).join("");
       const p = pilot();
       $("reread").disabled = !p || !p.loaded;
+      $("disconnectBtn").classList.toggle("hidden", !p || !p.drive);
       if (!p || !p.loaded) $("reread").checked = false;
     }
     async function selectPilot(key) {
@@ -505,13 +541,60 @@
       }
     }
 
+    /* ---------- Google Drive ---------- */
+    function renderDriveBox(data) {
+      const select = $("driveDonor");
+      if (!select.options.length) {
+        select.innerHTML = data.donors.map((d) => `<option value="${esc(d.value)}">Donante: ${esc(d.label)}</option>`).join("");
+      }
+      const ok = data.drive.available && data.data_dir_available;
+      $("driveBtn").disabled = !ok;
+      if (!state.driveMessage) {
+        const status = $("driveStatus");
+        status.className = "run-status" + (ok ? "" : " err");
+        status.textContent = ok ? "Listo para conectar." : "⚠️ " + (data.data_dir_available ? data.drive.message : "DATA_DIR no está definido.");
+      }
+    }
+    function driveStatus(message, kind) {
+      state.driveMessage = true;
+      $("driveStatus").className = "run-status" + (kind ? " " + kind : "");
+      $("driveStatus").textContent = message;
+    }
+    async function connectDrive() {
+      const body = { url: $("driveUrl").value, title: $("driveTitle").value, donor: $("driveDonor").value, report: $("driveReport").value };
+      if (!body.url.trim()) { driveStatus("⚠️ Pega el enlace de la carpeta de Drive.", "err"); return; }
+      $("driveBtn").disabled = true;
+      driveStatus("Comprobando el acceso a la carpeta…");
+      try {
+        const created = await api("/ui/drive/projects", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+        driveStatus(`✅ Carpeta «${created.folder_name}» conectada. Pulsa «Lanzar análisis» para descargarla y analizarla.`, "ok");
+        for (const id of ["driveUrl", "driveTitle", "driveReport"]) $(id).value = "";
+        await loadPilots();
+        await selectPilot(created.key);
+      } catch (error) {
+        driveStatus("❌ " + error.message, "err");
+      }
+      $("driveBtn").disabled = false;
+    }
+    async function disconnectDrive() {
+      const p = pilot();
+      if (!p || !p.drive || !confirm(`¿Quitar «${p.title}» de la lista? Los archivos descargados y lo revisado se conservan.`)) return;
+      try {
+        const r = await fetch(`/api/ui/drive/projects/${p.key}`, { method: "DELETE" });
+        if (!r.ok) throw new Error((await r.json()).detail || r.statusText);
+        state.key = null;
+        await loadPilots();
+        if (pilot()) { showJob(pilot().job); await loadReview(); }
+      } catch (error) { fatal("No se ha podido quitar la conexión: " + error.message); }
+    }
+
     /* ---------- datos del proyecto ---------- */
     async function loadReview() {
       const p = pilot();
       const loaded = p && p.loaded;
       for (const id of ["step2", "step3", "step4", "excelBtn"]) $(id).classList.toggle("hidden", !loaded);
       if (!loaded) return;
-      $("excelBtn").href = `/api/ui/pilots/${state.key}/export.xlsx`;
+      $("excelBtn").href = `/api/ui/pilots/${state.key}/report.xlsx`;
       try {
         const [review, budget] = await Promise.all([api(`/ui/pilots/${state.key}/review`), api(`/ui/pilots/${state.key}/budget`)]);
         state.review = review;

@@ -25,6 +25,8 @@ services:
       DATABASE_URL: postgresql+psycopg://revisor:revisor@db:5432/revisor
       DATA_DIR: /data
       CACHE_DIR: /app/cache
+      GOOGLE_CREDENTIALS: /secrets/credentials.json
+      GOOGLE_TOKEN: /secrets/token.json
       CORS_ORIGINS: http://localhost:5173
     ports:
       - "8000:8000"
@@ -32,6 +34,10 @@ services:
       - ./backend:/app
       # Confidential dataset, read-only. Set DATA_DIR in .env (host path).
       - ${DATA_DIR:-./data}:/data:ro
+      # Files mirrored from Google Drive: the only writable part of the dataset.
+      - ${DATA_DIR:-./data}/_drive:/data/_drive
+      # Google credentials and token (never committed).
+      - ./.secrets:/secrets
     depends_on:
       db:
         condition: service_healthy
@@ -47,11 +53,17 @@ services:
       DATABASE_URL: postgresql+psycopg://revisor:revisor@db:5432/revisor
       DATA_DIR: /data
       CACHE_DIR: /app/cache
+      GOOGLE_CREDENTIALS: /secrets/credentials.json
+      GOOGLE_TOKEN: /secrets/token.json
     ports:
       - "8501:8501"
     volumes:
       - ./backend:/app
       - ${DATA_DIR:-./data}:/data:ro
+      # Files mirrored from Google Drive: the only writable part of the dataset.
+      - ${DATA_DIR:-./data}/_drive:/data/_drive
+      # Google credentials and token (never committed).
+      - ./.secrets:/secrets
     depends_on:
       db:
         condition: service_healthy

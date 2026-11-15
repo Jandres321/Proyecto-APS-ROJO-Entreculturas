@@ -29,6 +29,12 @@ dev = [
 llm = [
     "anthropic>=0.40",
 ]
+# Google Drive as a source of files (app/drive.py).
+drive = [
+    "google-api-python-client>=2.100",
+    "google-auth>=2.20",
+    "google-auth-oauthlib>=1.0",
+]
 # Review app (ui/streamlit_app.py).
 ui = [
     "streamlit>=1.40",

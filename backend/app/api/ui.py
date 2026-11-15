@@ -1,9 +1,11 @@
-"""Routes of the web review app (app/web/index.html): pilots, launching the pipeline with
-progress, the expense-centred review, budget, PDF pages and the Excel download.
+"""Routes of the web review app (app/web/index.html): projects (built-in pilots and connected
+Google Drive folders), launching the pipeline with progress, the expense-centred review, budget,
+PDF pages and the Excel downloads.
 
 Decisions on findings use the existing `PATCH /api/findings/{id}`.
 """
 
+import datetime as dt
 import tempfile
 import threading
 from pathlib import Path
@@ -11,21 +13,26 @@ from typing import Any
 
 from fastapi import APIRouter, HTTPException, Response, status
 from fastapi.responses import FileResponse
+from pydantic import BaseModel
 from sqlalchemy import func, select
 
-from app import db
+from app import db, drive
+from app import projects as registry
 from app.api.deps import SessionDep
 from app.config import get_settings
+from app.enums import Donor
 from app.models import Document, Expense, Project
 from app.pipeline.export import export_project_xlsx
-from app.pipeline.run import PILOTS, STEPS, PilotProject, run_pipeline
+from app.pipeline.report import export_report_xlsx
+from app.pipeline.run import STEPS, PilotProject, run_pipeline
 from app.review_view import document_path, donor_rules, project_budget, project_review
 
 router = APIRouter(prefix="/ui", tags=["ui"])
 
 XLSX = "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+DONOR_LABELS_ES = {Donor.XUNTA: "Xunta de Galicia", Donor.AECID: "AECID"}
 
-# --- pipeline runs (one per pilot, in a background thread) -------------------------------------
+# --- pipeline runs (one per project, in a background thread) -----------------------------------
 
 _jobs: dict[str, dict[str, Any]] = {}
 _jobs_lock = threading.Lock()
@@ -53,22 +60,62 @@ def _summary_text(summary: Any) -> str:
     return text + "." + (" Se ha releído el informe." if summary.report_reread else "")
 
 
+def _sync_drive(project: registry.DriveProject, steps: int) -> tuple[PilotProject, str]:
+    """Mirror the Drive folder of a connected project and locate its report. Returns the project
+    ready for the pipeline and a sentence on what was downloaded."""
+
+    def on_progress(done: int, total: int) -> None:
+        _set_job(
+            project.key,
+            step=1,
+            steps=steps,
+            fraction=(done / max(total, 1)) / steps,
+            message=f"Descargando la carpeta de Google Drive ({done} de {total})",
+        )
+
+    _set_job(project.key, step=1, steps=steps, message="Conectando con Google Drive")
+    result = drive.sync_folder(
+        drive.build_service(),
+        project.drive_folder,
+        registry.local_folder(project),
+        registry.manifest_path(project),
+        on_progress,
+    )
+    report = registry.find_report(registry.local_folder(project), project.report)
+    note = (
+        f" Drive: {result.total} archivos ({result.downloaded} descargados, "
+        f"{result.unchanged} sin cambios"
+        + (f", {result.removed} eliminados" if result.removed else "")
+        + (f", {len(result.skipped)} documentos de Google omitidos" if result.skipped else "")
+        + ")."
+    )
+    return project.as_pilot(report), note
+
+
 def _run(pilot: PilotProject, reread: bool) -> None:
+    connected = registry.drive_projects().get(pilot.key)
+    offset = 1 if connected else 0  # a Drive project has one step more: the download
+    steps = len(STEPS) + offset
     order = {key: i for i, (key, _) in enumerate(STEPS)}
 
     def on_progress(step: str, fraction: float, message: str) -> None:
         _set_job(
             pilot.key,
-            step=order[step] + 1,
-            steps=len(STEPS),
-            fraction=min((order[step] + fraction) / len(STEPS), 1.0),
+            step=order[step] + 1 + offset,
+            steps=steps,
+            fraction=min((order[step] + offset + fraction) / steps, 1.0),
             message=message,
         )
 
     try:
+        note = ""
+        if connected:
+            pilot, note = _sync_drive(connected, steps)
         with db.SessionLocal() as session:
             summary = run_pipeline(session, pilot, reread_report=reread, on_progress=on_progress)
-        _set_job(pilot.key, state="done", fraction=1.0, message=_summary_text(summary))
+        _set_job(pilot.key, state="done", fraction=1.0, message=_summary_text(summary) + note)
+    except (drive.DriveError, registry.ProjectError) as error:
+        _set_job(pilot.key, state="error", message=str(error))
     except FileNotFoundError as error:
         _set_job(
             pilot.key,
@@ -80,9 +127,10 @@ def _run(pilot: PilotProject, reread: bool) -> None:
 
 
 def _pilot(key: str) -> PilotProject:
-    if key not in PILOTS:
+    pilots = registry.all_projects()
+    if key not in pilots:
         raise HTTPException(status.HTTP_404_NOT_FOUND, "Proyecto no encontrado")
-    return PILOTS[key]
+    return pilots[key]
 
 
 def _project(session: SessionDep, pilot: PilotProject) -> Project:
@@ -92,16 +140,17 @@ def _project(session: SessionDep, pilot: PilotProject) -> Project:
     return project
 
 
-# --- routes ------------------------------------------------------------------------------------
+# --- projects ----------------------------------------------------------------------------------
 
 
 @router.get("/pilots")
 def list_pilots(session: SessionDep) -> dict[str, Any]:
     """Projects that can be reviewed, whether each is already loaded, and the app settings the
-    page shows (data folder available, external LLM on/off)."""
+    page shows (data folder available, Drive available, external LLM on/off)."""
     settings = get_settings()
+    connected = registry.drive_projects()
     pilots = []
-    for pilot in PILOTS.values():
+    for pilot in registry.all_projects().values():
         project = session.scalar(select(Project).where(Project.code == pilot.code))
         expenses = (
             session.scalar(
@@ -118,22 +167,61 @@ def list_pilots(session: SessionDep) -> dict[str, Any]:
                 "code": pilot.code,
                 "expenses": expenses,
                 "loaded": bool(expenses),
+                "drive": pilot.key in connected,
                 "job": _job(pilot.key),
             }
         )
     external_llm = settings.llm_provider.strip().lower() != "fake" and settings.allow_external_llm
     return {
         "pilots": pilots,
+        "donors": [{"value": d.value, "label": DONOR_LABELS_ES.get(d, d.value)} for d in Donor],
         "data_dir_available": settings.data_dir_available,
+        "drive": drive.status(settings),
         "external_llm": external_llm,
         "llm_provider": settings.llm_provider if external_llm else None,
         "llm_model": settings.llm_model if external_llm else None,
     }
 
 
+class DriveConnection(BaseModel):
+    url: str
+    title: str
+    donor: str
+    report: str = ""
+
+
+@router.post("/drive/projects", status_code=status.HTTP_201_CREATED)
+def connect_drive(payload: DriveConnection) -> dict[str, Any]:
+    """Connect a Google Drive folder as a project. Checks that the folder can be opened; the
+    files are downloaded when the analysis is launched."""
+    try:
+        folder = drive.folder_id(payload.url)
+        name = drive.folder_name(drive.build_service(), folder)
+        project = registry.connect_drive_folder(
+            folder, payload.title or name, payload.donor, payload.report
+        )
+    except (drive.DriveError, registry.ProjectError) as error:
+        raise HTTPException(status.HTTP_400_BAD_REQUEST, str(error)) from None
+    return {"key": project.key, "title": project.title, "folder_name": name}
+
+
+@router.delete("/drive/projects/{key}", status_code=status.HTTP_204_NO_CONTENT)
+def disconnect_drive(key: str) -> Response:
+    """Forget a connected Drive folder (downloaded files and reviewed data are kept)."""
+    try:
+        registry.disconnect_drive_folder(key)
+    except registry.ProjectError as error:
+        raise HTTPException(status.HTTP_404_NOT_FOUND, str(error)) from None
+    return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# --- running and reviewing ---------------------------------------------------------------------
+
+
 @router.post("/pilots/{key}/run", status_code=status.HTTP_202_ACCEPTED)
 def launch(key: str, reread: bool = False) -> dict[str, Any]:
-    """Start the whole pipeline for a pilot in the background (poll `GET .../run`)."""
+    """Start the whole pipeline for a project in the background (poll `GET .../run`). A Drive
+    project first downloads what is new or changed in its folder."""
     pilot = _pilot(key)
     with _jobs_lock:
         if (_jobs.get(key) or {}).get("state") == "running":
@@ -166,17 +254,34 @@ def budget(key: str, session: SessionDep) -> dict[str, Any]:
     return project_budget(session, _project(session, _pilot(key)))
 
 
-@router.get("/pilots/{key}/export.xlsx")
-def export(key: str, session: SessionDep) -> Response:
-    """The review workbook, with the decisions taken so far."""
+def _workbook(writer: Any, session: SessionDep, key: str, name: str) -> Response:
     pilot = _pilot(key)
     project = _project(session, pilot)
     with tempfile.TemporaryDirectory() as tmp:
-        content = export_project_xlsx(session, project.id, Path(tmp) / "revision.xlsx").read_bytes()
-    name = f"{pilot.code}_revision.xlsx"
+        content = writer(session, project.id, Path(tmp) / "libro.xlsx").read_bytes()
+    filename = f"{pilot.code}_{name}.xlsx"
     return Response(
-        content, media_type=XLSX, headers={"Content-Disposition": f'attachment; filename="{name}"'}
+        content,
+        media_type=XLSX,
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
     )
+
+
+@router.get("/pilots/{key}/report.xlsx")
+def report(key: str, session: SessionDep) -> Response:
+    """Analysis report: a summary, one row per expense (verdict, document, what was read inside
+    it, findings) and the findings, budget and caps, with the decisions taken so far."""
+    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M")
+    return _workbook(export_report_xlsx, session, key, f"informe_analisis_{stamp}")
+
+
+@router.get("/pilots/{key}/export.xlsx")
+def export(key: str, session: SessionDep) -> Response:
+    """The review workbook of the Streamlit app (findings, expenses, budget, caps)."""
+    return _workbook(export_project_xlsx, session, key, "revision")
+
+
+# --- documents ---------------------------------------------------------------------------------
 
 
 def _pdf(session: SessionDep, document_id: int) -> Path:

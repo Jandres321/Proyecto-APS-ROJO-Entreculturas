@@ -16,7 +16,7 @@ WORKDIR /app
 
 # Install dependencies first (cached layer), then the code (mounted in dev).
 COPY pyproject.toml ./
-RUN uv pip install -r pyproject.toml --extra dev --extra ui --extra llm
+RUN uv pip install -r pyproject.toml --extra dev --extra ui --extra llm --extra drive
 
 COPY . .
 

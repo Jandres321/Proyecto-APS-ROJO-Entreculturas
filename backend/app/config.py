@@ -35,6 +35,11 @@ class Settings(BaseSettings):
 
     cache_dir: Path = Path("./cache")
 
+    # Google Drive as a source of files (app/drive.py): credentials JSON (service account or
+    # OAuth desktop app) and where the OAuth token is stored. Never committed (.secrets/).
+    google_credentials: Path = Path("../.secrets/credentials.json")
+    google_token: Path = Path("../.secrets/token.json")
+
     # PDF reading (app/lectura): Tesseract binary (None = look it up), tessdata folder with
     # the spa/eng/fra/osd models (None = Tesseract's default) and OCR settings.
     tesseract_cmd: str | None = None

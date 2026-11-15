@@ -29,8 +29,12 @@ TEST_PILOT = PilotProject("web", "Proyecto web de prueba", Donor.XUNTA, "WEB-1",
 
 
 @pytest.fixture
-def pilots(monkeypatch):
-    monkeypatch.setattr(ui, "PILOTS", {TEST_PILOT.key: TEST_PILOT})
+def pilots(monkeypatch, tmp_path):
+    from app import projects
+    from app.config import get_settings
+
+    monkeypatch.setattr(projects, "PILOTS", {TEST_PILOT.key: TEST_PILOT})
+    monkeypatch.setattr(get_settings(), "data_dir", tmp_path)  # no connected Drive folders
     monkeypatch.setattr(ui, "_jobs", {})
     return TEST_PILOT
 
@@ -172,6 +176,62 @@ def test_review_groups_documents_readings_and_findings_by_expense(db_session, pr
     assert [f["id"] for f in view["general_findings"]] == [general.id]
 
 
+# --- analysis report (database) ---
+
+
+def test_the_report_has_one_row_per_expense_with_what_was_really_read(
+    db_session, project, tmp_path
+):
+    from openpyxl import load_workbook
+
+    from app.pipeline.report import export_report_xlsx
+    from app.review import set_decision
+
+    with_doc, without, doc, own, general = fill(db_session, project)
+    set_decision(db_session, own.id, FindingStatus.ACCEPTED, "Pedir el sello al socio")
+    book = load_workbook(export_report_xlsx(db_session, project.id, tmp_path / "informe.xlsx"))
+    assert book.sheetnames == [
+        "Resumen",
+        "Análisis por gasto",
+        "Incidencias",
+        "Presupuesto",
+        "Topes",
+    ]
+
+    sheet = book["Análisis por gasto"]
+    header = [c.value for c in sheet[1]]
+    first, second = (
+        dict(zip(header, [c.value for c in row], strict=True)) for row in sheet.iter_rows(min_row=2)
+    )
+    assert (first["Nº orden"], first["Semáforo"], first["Veredicto"]) == (
+        "1",
+        "rojo",
+        "1 incidencia confirmada",
+    )
+    assert first["Documentos vinculados"] == "1. Factura.pdf"
+    assert first["Verificado por contenido"] == "sí"
+    assert first["Leído: importe"] == "1,500.00 UGX"
+    # not read inside the PDF: empty, never the listing's value
+    assert first["Leído: emisor"] is None and first["Leído: fecha"] is None
+    assert first["Leído: sello del donante"] == "no"
+    assert (first["Incidencias abiertas"], first["Incidencias aceptadas"]) == (0, 1)
+    assert "Falta el sello del donante: Falta el sello." in first["Detalle de las incidencias"]
+    assert "nota: Pedir el sello al socio" in first["Detalle de las incidencias"]
+
+    assert (second["Nº orden"], second["Semáforo"], second["Veredicto"]) == (
+        "2",
+        "gris",
+        "Sin justificante",
+    )
+    # nothing was read for an expense without document: the cells stay empty, not "no"
+    assert second["Leído: sello del donante"] is None and second["Documentos vinculados"] is None
+
+    summary = {row[0].value: row[1].value for row in book["Resumen"].iter_rows(min_row=2)}
+    assert summary["Gastos del informe"] == 2 and summary["Gastos sin justificante"] == 1
+    assert summary["Incidencias aceptadas (reales)"] == 1 and summary["Incidencias abiertas"] == 1
+    assert summary["   · Desviación respecto al presupuesto"] == 1
+
+
 # --- /api/ui (database) ---
 
 
@@ -191,7 +251,9 @@ def test_api_serves_pilots_review_budget_and_excel(db_session, project, pilots, 
     listing = api.get("/api/ui/pilots").json()
     (pilot,) = listing["pilots"]
     assert (pilot["key"], pilot["expenses"], pilot["loaded"]) == ("web", 2, True)
-    assert pilot["job"] == {"state": "idle"}
+    assert pilot["job"] == {"state": "idle"} and pilot["drive"] is False
+    assert {d["value"] for d in listing["donors"]} == {"xunta", "aecid"}
+    assert set(listing["drive"]) == {"available", "message"}
 
     review = api.get("/api/ui/pilots/web/review").json()
     assert len(review["expenses"]) == 2 and "rules" in review
@@ -200,6 +262,9 @@ def test_api_serves_pilots_review_budget_and_excel(db_session, project, pilots, 
     excel = api.get("/api/ui/pilots/web/export.xlsx")
     assert excel.status_code == 200 and excel.content[:2] == b"PK"
     assert "WEB-1_revision.xlsx" in excel.headers["content-disposition"]
+    report = api.get("/api/ui/pilots/web/report.xlsx")
+    assert report.status_code == 200 and report.content[:2] == b"PK"
+    assert "WEB-1_informe_analisis_" in report.headers["content-disposition"]
 
     assert api.get("/api/ui/pilots/otro/review").status_code == 404
 
