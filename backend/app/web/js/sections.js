@@ -62,7 +62,10 @@ async function createProject(ev) {
       const report = $("newReport").files[0];
       const docs = Array.from($("newDocs").files);
       if (!report) throw new Error("Elige el Excel del informe económico.");
-      if (!docs.length) throw new Error("Elige los justificantes (PDF o un .zip).");
+      if (!docs.length) throw new Error("Elige los justificantes (uno o varios PDF).");
+      // `accept` is only a hint to the file dialog: reject anything that is not a PDF here too.
+      const notPdf = docs.filter((d) => !d.name.toLowerCase().endsWith(".pdf"));
+      if (notPdf.length) throw new Error(`Los justificantes deben ser PDF. No lo son: ${notPdf.map((d) => d.name).join(", ")}.`);
       const form = new FormData();
       for (const [k, v] of Object.entries(common)) form.append(k, v);
       form.append("report", report);
