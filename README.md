@@ -27,7 +27,8 @@ docker compose up --build # o: make up
 |---|---|
 | Web (placeholder) | http://localhost:5173 |
 | API | http://localhost:8000 (docs en `/docs`, salud en `/health`) |
-| App de revisión (Streamlit) | http://localhost:8501 (`make ui`) |
+| **App de revisión (web)** | http://localhost:8000 (la sirve la propia API) |
+| App de revisión (Streamlit, alternativa) | http://localhost:8501 (`make ui`) |
 | PostgreSQL | localhost:5432 (usuario/clave/base: `revisor`) |
 
 El contenedor `api` aplica las migraciones al arrancar y recarga el código en caliente.
@@ -328,7 +329,50 @@ es genérica porque no tenemos la regla de modificaciones de la convocatoria.
 (regla, gasto, documento) y, para las que no cuelgan de ninguno (presupuesto), por `evidence["subject"]`
 (partida o código del tope). Así una decisión sobre un tope no esconde otro de la misma regla.
 
+## App de revisión web (`backend/app/web/index.html`)
+
+Interfaz principal para el técnico. Es una sola página estática que sirve la API en `/` y que habla con
+`/api`: no necesita Node ni internet. Hace lo mismo que la app de Streamlit, con otra presentación.
+
+**De dónde sale el diseño.** El aspecto (barra superior, tarjetas por pasos, tarjetas semáforo que filtran y
+**una fila desplegable por gasto**) viene del prototipo `app_voluntariado` del equipo. De ese prototipo se ha
+tomado **solo la estética**: sus datos venían escritos dentro de la página y los campos «leídos del PDF» eran
+copia del listado, así que sus resultados no medían nada. Aquí **todo lo que se ve sale de la base de datos**,
+es decir, de lo que el pipeline ha leído y cruzado de verdad:
+
+- Un dato que no se ha leído dentro del PDF se muestra como *no leído*; nunca se rellena con el del listado.
+- No hay porcentaje de confianza inventado: el veredicto de cada gasto se calcula con su estado de justificante
+  y sus incidencias (`app/review_view.py → expense_verdict`), y la confianza es la del cruce (alta/media/baja).
+- No hay incidencias escritas a mano para casos concretos.
+
+| Paso | Qué hace |
+|---|---|
+| **1. Proyecto y análisis** | Pestañas con los proyectos (`pipeline/run.py: PILOTS`) y botón **Lanzar análisis**: ejecuta el pipeline completo en segundo plano con barra de progreso. *Releer el informe* se comporta igual que en Streamlit |
+| **2. Reglas, presupuesto y topes** | Reglas activas del donante (de `rules/<donante>.yaml`), aprobado frente a ejecutado por partida con su semáforo y topes del donante |
+| **3. Listado de gastos** | Una fila por gasto con su veredicto. Tarjetas semáforo (todos / hay que revisar / sin justificante / sin incidencias), buscador, filtros por incidencia, gravedad y estado, y orden. Al desplegar: **justificantes vinculados** (método, confianza, si está verificado por contenido y por qué), **qué se ha leído dentro del PDF** (emisor, nº de factura, fecha, importe, sello, prueba de pago, legibilidad, por segmento) e **incidencias del gasto** con su evidencia |
+| **4. Incidencias generales** | Las que no cuelgan de un gasto: presupuesto, topes, documentos y segmentos sin gasto |
+
+- **Decisión por incidencia:** *Aceptar*, *Falso positivo* o *Reabrir*, con nota opcional (`PATCH /api/findings/{id}`).
+  Sobrevive a relanzar el análisis. En la fila del gasto hay dos atajos sobre todas sus incidencias abiertas:
+  *Dar por bueno* (las marca como falso positivo) y *Confirmar* (las acepta como reales).
+- **PDF al lado:** *Ver en el PDF* abre la página del problema, con anterior/siguiente y giro de 90° (muchos
+  escaneos vienen del revés), y un enlace para abrir el PDF original. Solo se sirven archivos registrados
+  que estén dentro de `DATA_DIR`.
+- **Excel:** *Descargar Excel revisado* genera el mismo libro que Streamlit, con las decisiones tomadas.
+- **IA externa:** la página solo **muestra** si está activada (`LLM_PROVIDER` / `ALLOW_EXTERNAL_LLM` del
+  `.env`). No pide ni guarda ninguna clave en el navegador.
+
+**Lo que no se ha traído del prototipo, y por qué:** subir un Excel y PDFs sueltos desde el navegador (aquí los
+proyectos se definen en `PILOTS` y se leen de `DATA_DIR`), las reglas editables desde la interfaz (las reglas
+viven en `rules/<donante>.yaml`), la clave de Claude guardada en el navegador y el OCR en el navegador.
+
+Rutas que usa (`app/api/ui.py`): `GET /api/ui/pilots`, `POST` y `GET /api/ui/pilots/{key}/run`,
+`GET /api/ui/pilots/{key}/review`, `.../budget`, `.../export.xlsx`, `GET /api/ui/documents/{id}/page/{n}.png`
+y `.../file`. Probada con `tests/test_web_app.py` (datos inventados) y a mano con Uganda.
+
 ## App de revisión (Streamlit, `backend/ui/streamlit_app.py`)
+
+Alternativa a la app web, con las mismas funciones y los mismos datos.
 
 Interfaz para el técnico: lanza el pipeline completo de un proyecto y revisa las incidencias con el PDF
 al lado.
@@ -459,8 +503,10 @@ backend/app/
               match_eval.py: validación contra la numeración manual
   lectura/    OCR y segmentación de PDF
   llm/        interfaz LLMClient + factory (proveedor por LLM_PROVIDER; "fake" para tests)
-  api/        rutas (projects, findings)
-backend/ui/        app de revisión (Streamlit)
+  api/        rutas (projects, findings, ui: las de la app web)
+  review_view.py  vista por gasto (documentos, lo leído, incidencias y veredicto) para la app web
+  web/        app de revisión web: una página estática (index.html) que sirve la API en /
+backend/ui/        app de revisión alternativa (Streamlit)
 backend/alembic/   migraciones
 frontend/          Vite + React + TS (TanStack Query/Table, react-pdf, react-router)
 ```
@@ -471,7 +517,7 @@ frontend/          Vite + React + TS (TanStack Query/Table, react-pdf, react-rou
 |---|---|
 | Adaptadores Xunta y AECID, ingesta, lectura de PDF, cruce híbrido (nombre propone, contenido verifica), comprobaciones | Hechos |
 | Presupuesto y topes (`budget.py`), revisión de incidencias (`review.py`), Excel (`export.py`) | Hechos |
-| App de revisión (Streamlit) y rutas de findings de la API | Hechas |
+| App de revisión web (diseño de `app_voluntariado`, datos reales), app de Streamlit y rutas de findings de la API | Hechas |
 | Extracción con LLM (`extract.py`), sugerencia de partida (`classify.py`, proceso 2b) | Pendientes (stubs) |
 | Rutas `projects` de la API, frontend React | Pendientes (501 / placeholder) |
 
@@ -532,9 +578,18 @@ conjunto de datos.
 
 - Tests del conciliador: 57 de 57.
 - Tests del backend **dentro de Docker** (imagen `api`, con Tesseract 5.5, PostgreSQL y los datos reales
-  montados en `/data`): **324 de 324**, sin saltos. Es lo que ejecuta `make test` con `DATA_DIR` definido.
+  montados en `/data`): **332 de 332**, sin saltos, sobre una base de datos vacía.
+- **Los tests con base de datos suponen que está vacía.** Después de lanzar un análisis desde la app (web o
+  Streamlit), que sí guarda en la base, fallan 17 tests que comprueban cosas como «no hay ningún vínculo».
+  Para no borrar lo analizado, ejecútalos contra una base aparte:
+  ```bash
+  docker compose exec db createdb -U revisor revisor_test      # una vez
+  docker compose run --rm -e DATABASE_URL=postgresql+psycopg://revisor:revisor@db:5432/revisor_test       api sh -c "alembic upgrade head && pytest"
+  ```
 - Fuera de Docker (Python 3.12, sin Tesseract) pasan 322, se salta 1 y falla
   `test_streamlit_app.py::test_launching_the_analysis_runs_the_whole_pipeline`: espera incidencias que salen de
   leer los PDF con OCR. No es un fallo del código; para la batería completa hay que usar Docker o instalar
   Tesseract.
-- **Sin probar:** el cliente de Anthropic contra la API real (solo con una API simulada) y la app Streamlit a mano.
+- App web probada a mano con Uganda (análisis completo, visor de PDF, decisiones, filtros, presupuesto y Excel).
+- **Sin probar:** el cliente de Anthropic contra la API real (solo con una API simulada), la app web con
+  Paraguay y la app Streamlit a mano.

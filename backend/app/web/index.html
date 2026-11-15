@@ -1,0 +1,830 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Entreculturas — Revisor de justificación</title>
+  <!--
+    Web review app. The look (top bar, step cards, traffic-light filter cards, one collapsible row
+    per expense) comes from the team's "app_voluntariado" prototype. Every figure shown here comes
+    from the backend (/api): nothing is embedded in this page and nothing is copied from the
+    listing into the "read inside the PDF" fields. No external resources: it works offline.
+  -->
+  <style>
+    :root {
+      --bg: #f4f6fb; --card: #ffffff; --border: #dce3f0; --text: #1e293b; --muted: #64748b;
+      --primary: #1d4ed8; --primary-soft: #eff6ff;
+      --green: #15803d; --green-bg: #dcfce7; --green-border: #86efac;
+      --amber: #b45309; --amber-bg: #fef3c7; --amber-border: #fcd34d;
+      --red: #b91c1c; --red-bg: #fee2e2; --red-border: #fca5a5;
+      --gray-bg: #f1f5f9; --gray-border: #cbd5e1;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', system-ui, -apple-system, sans-serif;
+      background: var(--bg); color: var(--text); line-height: 1.5; padding-bottom: 60px;
+    }
+    .topbar {
+      background: #ffffff; border-bottom: 2px solid var(--border); padding: 16px 28px;
+      display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;
+      position: sticky; top: 0; z-index: 100; box-shadow: 0 2px 10px rgba(15, 23, 42, 0.05);
+    }
+    .brand { display: flex; align-items: center; gap: 14px; }
+    .brand-icon {
+      width: 44px; height: 44px; border-radius: 10px; background: #b91c1c; color: #fff;
+      font-weight: 800; font-size: 20px; display: flex; align-items: center; justify-content: center;
+    }
+    .brand h1 { font-size: 20px; font-weight: 800; color: #0f172a; }
+    .brand p { font-size: 13px; color: var(--muted); }
+    .top-actions { display: flex; gap: 10px; align-items: center; flex-wrap: wrap; }
+
+    .btn {
+      border: 1px solid var(--border); background: #fff; color: var(--text); padding: 9px 15px;
+      border-radius: 8px; font-size: 13.5px; font-weight: 600; cursor: pointer;
+      display: inline-flex; align-items: center; gap: 7px; transition: all 0.15s; text-decoration: none;
+      font-family: inherit;
+    }
+    .btn:hover { background: #f8fafc; border-color: #94a3b8; }
+    .btn:disabled { opacity: 0.55; cursor: not-allowed; }
+    .btn-primary { background: var(--primary); color: #fff; border-color: var(--primary); }
+    .btn-primary:hover { background: #1e40af; }
+    .btn-success { background: var(--green); color: #fff; border-color: var(--green); }
+    .btn-success:hover { background: #166534; }
+    .btn-sm { padding: 6px 10px; font-size: 12.5px; }
+
+    .container { max-width: 1400px; margin: 22px auto; padding: 0 20px; display: flex; flex-direction: column; gap: 20px; }
+    .step-card {
+      background: var(--card); border: 1px solid var(--border); border-radius: 14px;
+      padding: 20px 24px; box-shadow: 0 2px 6px rgba(15, 23, 42, 0.03);
+    }
+    .step-header { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; margin-bottom: 14px; }
+    .step-title { display: flex; align-items: center; gap: 10px; font-size: 17px; font-weight: 700; color: #0f172a; }
+    .step-badge {
+      background: var(--primary); color: #fff; font-size: 12px; font-weight: 800;
+      padding: 3px 10px; border-radius: 999px; text-transform: uppercase; white-space: nowrap;
+    }
+    .step-sub { font-size: 13.5px; color: var(--muted); }
+
+    .country-tabs { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 18px; }
+    .country-tab {
+      padding: 10px 16px; border-radius: 10px; border: 2px solid var(--border); background: #f8fafc;
+      font-size: 14px; font-weight: 700; color: #334155; cursor: pointer; display: flex;
+      align-items: center; gap: 8px; transition: all 0.15s; font-family: inherit;
+    }
+    .country-tab:hover { border-color: #93c5fd; background: #eff6ff; }
+    .country-tab.active {
+      border-color: var(--primary); background: var(--primary-soft); color: var(--primary);
+      box-shadow: 0 2px 8px rgba(29, 78, 216, 0.12);
+    }
+    .country-tab .count-pill { background: #e2e8f0; color: #1e293b; padding: 2px 8px; border-radius: 999px; font-size: 12px; }
+    .country-tab.active .count-pill { background: var(--primary); color: #fff; }
+
+    .run-box {
+      border: 2px dashed #38bdf8; background: #f0f9ff; border-radius: 12px; padding: 16px 20px;
+      display: flex; flex-direction: column; gap: 12px;
+    }
+    .run-row { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 12px; }
+    .run-box h3 { font-size: 15px; font-weight: 800; color: #0f172a; }
+    .run-box p { font-size: 13px; color: #475569; }
+    .progress { height: 12px; background: #e2e8f0; border-radius: 999px; overflow: hidden; }
+    .progress > div { height: 100%; width: 0; background: var(--primary); transition: width 0.3s; }
+    .run-status {
+      font-size: 12.5px; font-weight: 700; padding: 7px 11px; border-radius: 6px;
+      background: rgba(255,255,255,0.9); color: #0f172a; border: 1px solid rgba(0,0,0,0.08);
+    }
+    .run-status.ok { background: var(--green-bg); border-color: var(--green-border); color: #14532d; }
+    .run-status.err { background: var(--red-bg); border-color: var(--red-border); color: #7f1d1d; }
+    .notice {
+      font-size: 12.5px; color: #475569; background: #eff6ff; border-left: 4px solid var(--primary);
+      padding: 9px 13px; border-radius: 6px;
+    }
+    .notice.warn { background: var(--amber-bg); border-left-color: #f59e0b; color: #78350f; }
+    .notice.err { background: var(--red-bg); border-left-color: #dc2626; color: #7f1d1d; }
+
+    .custom-rules-list { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
+    .custom-rule-tag {
+      background: #eff6ff; border: 1px solid #93c5fd; color: #1e3a8a; padding: 6px 12px;
+      border-radius: 999px; font-size: 12.5px; font-weight: 700; display: inline-flex; align-items: center; gap: 8px;
+    }
+    .sub-block { background: #f8fafc; border: 1px solid var(--border); border-radius: 12px; padding: 14px 18px; margin-bottom: 14px; }
+    .sub-block > strong { font-size: 14px; color: #0f172a; }
+
+    .filter-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(210px, 1fr)); gap: 12px; margin-bottom: 16px; }
+    .filter-card {
+      border: 2px solid var(--border); background: #fff; border-radius: 12px; padding: 13px 16px;
+      cursor: pointer; transition: all 0.15s; text-align: left; display: flex; flex-direction: column; gap: 3px;
+      font-family: inherit; color: inherit;
+    }
+    .filter-card:hover { transform: translateY(-1px); box-shadow: 0 4px 10px rgba(0,0,0,0.05); }
+    .filter-card.active { border-color: var(--primary); background: var(--primary-soft); }
+    .filter-card.red.active { border-color: var(--red); background: #fef2f2; }
+    .filter-card.gray.active { border-color: #475569; background: #f1f5f9; }
+    .filter-card.green.active { border-color: var(--green); background: #f0fdf4; }
+    .filter-card .f-num { font-size: 25px; font-weight: 800; color: #0f172a; }
+    .filter-card .f-label { font-size: 13.5px; font-weight: 700; }
+    .filter-card .f-sub { font-size: 11.5px; color: var(--muted); }
+
+    .search-row { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; margin-bottom: 14px; }
+    .search-input { flex: 1; min-width: 240px; padding: 10px 14px; border: 1px solid #cbd5e1; border-radius: 9px; font-size: 14px; font-family: inherit; }
+    .search-row select { padding: 10px 12px; border: 1px solid #cbd5e1; border-radius: 9px; font-weight: 600; font-family: inherit; max-width: 100%; }
+
+    .accordion-list { display: flex; flex-direction: column; gap: 10px; }
+    .acc-item { background: #ffffff; border: 1.5px solid var(--border); border-radius: 12px; overflow: hidden; transition: all 0.15s; }
+    .acc-item:hover { border-color: #93c5fd; box-shadow: 0 3px 10px rgba(15, 23, 42, 0.05); }
+    .acc-item.status-review { border-left: 6px solid #f59e0b; }
+    .acc-item.status-critical { border-left: 6px solid #dc2626; }
+    .acc-item.status-nopdf { border-left: 6px solid #64748b; }
+    .acc-item.status-ok { border-left: 6px solid #16a34a; }
+    .acc-header {
+      padding: 14px 18px; display: grid; grid-template-columns: 2.2fr 2fr 1.6fr auto; gap: 14px;
+      align-items: center; cursor: pointer; user-select: none;
+    }
+    @media (max-width: 960px) { .acc-header { grid-template-columns: 1fr; } }
+    .acc-header:hover { background: rgba(241, 245, 249, 0.6); }
+    .h-excel-main { display: flex; flex-direction: column; gap: 3px; min-width: 0; }
+    .h-order-title { font-weight: 800; font-size: 14.5px; color: #0f172a; display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
+    .h-submeta { font-size: 12.5px; color: #475569; }
+    .h-amount-pill {
+      display: inline-block; background: #eff6ff; border: 1px solid #bfdbfe; color: #1e40af;
+      font-weight: 800; font-size: 12.5px; padding: 2px 8px; border-radius: 6px;
+    }
+    .h-file-trigger { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .file-pill-btn {
+      display: inline-flex; align-items: center; gap: 8px; background: #f8fafc; border: 1px solid #cbd5e1;
+      padding: 7px 12px; border-radius: 8px; font-size: 13px; font-weight: 700; color: #1d4ed8;
+      width: fit-content; max-width: 100%; overflow-wrap: anywhere;
+    }
+    .acc-item.open .file-pill-btn { background: #eff6ff; border-color: #3b82f6; }
+    .file-pill-nopdf {
+      display: inline-flex; align-items: center; gap: 7px; background: #fee2e2; border: 1px solid #fca5a5;
+      padding: 6px 11px; border-radius: 8px; font-size: 12.5px; font-weight: 700; color: #991b1b; width: fit-content;
+    }
+    .file-pill-na {
+      display: inline-flex; align-items: center; gap: 7px; background: var(--gray-bg); border: 1px solid var(--gray-border);
+      padding: 6px 11px; border-radius: 8px; font-size: 12.5px; font-weight: 700; color: #475569; width: fit-content;
+    }
+    .click-hint { font-size: 11.5px; color: #64748b; font-weight: 600; }
+    .h-conf-col { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+    .conf-badge { display: inline-flex; align-items: center; gap: 6px; padding: 5px 11px; border-radius: 999px; font-weight: 800; font-size: 13px; width: fit-content; }
+    .conf-high { background: var(--green-bg); color: var(--green); border: 1px solid var(--green-border); }
+    .conf-med { background: var(--amber-bg); color: var(--amber); border: 1px solid var(--amber-border); }
+    .conf-low { background: var(--red-bg); color: var(--red); border: 1px solid var(--red-border); }
+    .conf-none { background: var(--gray-bg); color: #475569; border: 1px solid var(--gray-border); }
+    .h-short-reason { font-size: 12px; color: #475569; }
+    .h-right-actions { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
+    .rev-mini-btn {
+      padding: 6px 10px; border-radius: 7px; border: 1px solid #cbd5e1; background: #fff;
+      font-size: 12px; font-weight: 700; cursor: pointer; font-family: inherit; white-space: nowrap;
+    }
+    .rev-mini-btn:hover { background: #f1f5f9; }
+    .rev-mini-btn.active-ok { background: #15803d; color: #fff; border-color: #15803d; }
+    .rev-mini-btn.active-flag { background: #b91c1c; color: #fff; border-color: #b91c1c; }
+    .chevron-box {
+      width: 32px; height: 32px; border-radius: 8px; background: #f1f5f9; color: #334155; display: flex;
+      align-items: center; justify-content: center; font-size: 14px; font-weight: 800; transition: transform 0.2s; flex: none;
+    }
+    .acc-item.open .chevron-box { transform: rotate(180deg); background: var(--primary); color: #fff; }
+    .acc-body { border-top: 1px solid #e2e8f0; background: #f8fafc; padding: 18px 20px; }
+    .detail-grid { display: grid; grid-template-columns: 1fr 1.15fr 1.25fr; gap: 16px; }
+    @media (max-width: 1024px) { .detail-grid { grid-template-columns: 1fr; } }
+    .detail-box { background: #ffffff; border: 1px solid #dce3f0; border-radius: 10px; padding: 14px 16px; display: flex; flex-direction: column; gap: 10px; min-width: 0; }
+    .detail-box h4 {
+      font-size: 13px; font-weight: 800; text-transform: uppercase; color: #334155;
+      border-bottom: 1px solid #f1f5f9; padding-bottom: 6px; display: flex; align-items: center; gap: 6px;
+    }
+    .pdf-cand-card { background: #f8fafc; border: 1px solid #cbd5e1; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 6px; }
+    .pdf-open-link {
+      display: inline-flex; align-items: center; gap: 6px; background: var(--primary); color: #fff; text-decoration: none;
+      font-weight: 700; font-size: 12.5px; padding: 7px 12px; border-radius: 7px; width: fit-content; border: none; cursor: pointer; font-family: inherit;
+    }
+    .pdf-open-link:hover { background: #1e40af; }
+    .pdf-open-link.sec { background: #f8fafc; color: #334155; border: 1px solid #cbd5e1; }
+    .pdf-open-link.sec:hover { background: #e2e8f0; }
+    .detail-list { padding-left: 18px; font-size: 13px; color: #1e293b; display: flex; flex-direction: column; gap: 4px; }
+    .not-read { color: #94a3b8; font-style: italic; }
+    .excel-full-details {
+      margin-top: 12px; padding: 10px 14px; background: #eff6ff; border: 1px solid #bfdbfe; border-radius: 8px;
+      font-size: 12.5px; color: #1e3a8a; display: flex; flex-wrap: wrap; gap: 8px 16px; align-items: center;
+    }
+
+    .finding-card { border: 1px solid #e2e8f0; border-left: 5px solid #94a3b8; border-radius: 8px; padding: 10px 12px; display: flex; flex-direction: column; gap: 7px; background: #fff; }
+    .finding-card.sev-high { border-left-color: #dc2626; }
+    .finding-card.sev-medium { border-left-color: #f59e0b; }
+    .finding-card.sev-low { border-left-color: #eab308; }
+    .finding-card.st-accepted { background: #fef2f2; }
+    .finding-card.st-false_positive { background: #f1f5f9; opacity: 0.85; }
+    .finding-head { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; font-size: 13px; font-weight: 800; color: #0f172a; }
+    .pill { font-size: 11.5px; font-weight: 800; padding: 2px 8px; border-radius: 999px; border: 1px solid var(--gray-border); background: var(--gray-bg); color: #475569; white-space: nowrap; }
+    .pill.high { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
+    .pill.medium { background: var(--amber-bg); color: var(--amber); border-color: var(--amber-border); }
+    .pill.low { background: #fefce8; color: #854d0e; border-color: #fde047; }
+    .pill.accepted { background: var(--red-bg); color: var(--red); border-color: var(--red-border); }
+    .pill.false_positive { background: var(--gray-bg); color: #475569; }
+    .pill.open { background: #eff6ff; color: #1e40af; border-color: #bfdbfe; }
+    .pill.ok { background: var(--green-bg); color: var(--green); border-color: var(--green-border); }
+    .finding-msg { font-size: 13px; color: #1e293b; }
+    .finding-card details { font-size: 12px; color: #475569; }
+    .finding-card pre { background: #f8fafc; border: 1px solid #e2e8f0; border-radius: 6px; padding: 8px; overflow: auto; max-height: 180px; font-size: 11.5px; margin-top: 4px; }
+    .finding-actions { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+    .finding-actions input { flex: 1; min-width: 140px; padding: 6px 9px; border: 1px solid #cbd5e1; border-radius: 7px; font-size: 12.5px; font-family: inherit; }
+
+    .sheet-scroll { overflow: auto; border: 1px solid #cbd5e1; border-radius: 10px; background: #fff; margin-top: 10px; }
+    .sheet-table { width: 100%; border-collapse: collapse; font-size: 12.5px; }
+    .sheet-table th { background: #f1f5f9; color: #334155; font-weight: 800; padding: 8px 10px; border: 1px solid #cbd5e1; text-align: left; white-space: nowrap; }
+    .sheet-table td { padding: 7px 10px; border: 1px solid #e2e8f0; color: #1e293b; vertical-align: top; }
+    .sheet-table td.num { text-align: right; white-space: nowrap; font-variant-numeric: tabular-nums; }
+    .tl { font-weight: 800; padding: 2px 9px; border-radius: 999px; }
+    .tl.verde { background: var(--green-bg); color: var(--green); }
+    .tl.amarillo { background: var(--amber-bg); color: var(--amber); }
+    .tl.rojo { background: var(--red-bg); color: var(--red); }
+
+    .modal-backdrop { position: fixed; inset: 0; background: rgba(15, 23, 42, 0.55); display: none; align-items: center; justify-content: center; z-index: 999; padding: 20px; }
+    .modal-backdrop.show { display: flex; }
+    .viewer-card {
+      background: #ffffff; border-radius: 16px; max-width: 1040px; width: 96%; max-height: 92vh; padding: 18px 22px;
+      box-shadow: 0 24px 50px rgba(15, 23, 42, 0.3); border: 1px solid #cbd5e1; display: flex; flex-direction: column; gap: 12px;
+    }
+    .viewer-card h3 { font-size: 16px; font-weight: 800; color: #0f172a; overflow-wrap: anywhere; }
+    .viewer-bar { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+    .viewer-scroll { overflow: auto; border: 1px solid #cbd5e1; border-radius: 10px; background: #e2e8f0; min-height: 200px; text-align: center; }
+    .viewer-scroll img { max-width: 100%; display: block; margin: 0 auto; }
+    .empty { text-align: center; padding: 30px; background: #f8fafc; border: 1px dashed #cbd5e1; border-radius: 12px; color: #475569; }
+    .hidden { display: none !important; }
+  </style>
+</head>
+<body>
+
+  <!-- PDF viewer -->
+  <div class="modal-backdrop" id="viewer" onclick="if(event.target===this) closeViewer()">
+    <div class="viewer-card">
+      <div class="viewer-bar">
+        <h3 id="viewerTitle">Documento</h3>
+        <button class="btn btn-sm" onclick="closeViewer()">✖️ Cerrar</button>
+      </div>
+      <div class="viewer-bar">
+        <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+          <button class="btn btn-sm" onclick="viewerStep(-1)">◀ Anterior</button>
+          <span id="viewerPage" style="font-size:13px; font-weight:700;"></span>
+          <button class="btn btn-sm" onclick="viewerStep(1)">Siguiente ▶</button>
+          <button class="btn btn-sm" onclick="viewerRotate()" title="Muchos escaneos vienen del revés">🔄 Girar 90°</button>
+        </div>
+        <a class="pdf-open-link" id="viewerOpen" href="#" target="_blank" rel="noopener">🔗 Abrir PDF original</a>
+      </div>
+      <div class="viewer-scroll" id="viewerBody"></div>
+      <div class="step-sub" id="viewerNote"></div>
+    </div>
+  </div>
+
+  <header class="topbar">
+    <div class="brand">
+      <div class="brand-icon">EC</div>
+      <div>
+        <h1>Revisor de justificación (Entreculturas)</h1>
+        <p>Pulsa sobre cualquier gasto para desplegar sus justificantes, lo leído dentro del PDF y sus incidencias</p>
+      </div>
+    </div>
+    <div class="top-actions">
+      <span class="pill" id="llmPill" title="">…</span>
+      <a class="btn btn-primary hidden" id="excelBtn" href="#">📥 Descargar Excel revisado</a>
+    </div>
+  </header>
+
+  <main class="container">
+    <div class="notice err hidden" id="fatal"></div>
+
+    <!-- Paso 1 -->
+    <section class="step-card">
+      <div class="step-header">
+        <div class="step-title"><span class="step-badge">Paso 1</span><span>Elige el proyecto y lanza el análisis</span></div>
+        <span class="step-sub">El informe económico es la base y se compara con el interior de los PDF</span>
+      </div>
+      <div class="country-tabs" id="pilotTabs"></div>
+      <div class="run-box">
+        <div class="run-row">
+          <div>
+            <h3>▶ Análisis completo del proyecto</h3>
+            <p>Lee el informe, inventaría y lee los justificantes, los cruza con los gastos, aplica las reglas del donante y revisa el presupuesto.</p>
+          </div>
+          <div style="display:flex; gap:12px; align-items:center; flex-wrap:wrap;">
+            <label style="font-size:13px; font-weight:600; display:flex; gap:6px; align-items:center;" title="Vuelve a leer el Excel del informe. Descarta las decisiones tomadas sobre incidencias de gastos concretos (las de presupuesto se conservan).">
+              <input type="checkbox" id="reread" /> Releer el informe
+            </label>
+            <button class="btn btn-primary" id="runBtn" onclick="launch()">▶ Lanzar análisis</button>
+          </div>
+        </div>
+        <div class="progress hidden" id="progress"><div id="progressBar"></div></div>
+        <span class="run-status" id="runStatus">Elige un proyecto.</span>
+      </div>
+      <div class="notice" style="margin-top:12px;" id="localNote">ℹ️ El análisis conserva tus decisiones al relanzarlo.</div>
+    </section>
+
+    <!-- Paso 2 -->
+    <section class="step-card hidden" id="step2">
+      <div class="step-header">
+        <div class="step-title"><span class="step-badge">Paso 2</span><span>Reglas del donante, presupuesto y topes</span></div>
+        <button class="btn" onclick="toggleStep2()" id="step2Btn">🔽 Mostrar</button>
+      </div>
+      <div class="hidden" id="step2Body">
+        <div class="sub-block">
+          <strong>☑️ Reglas que se comprueban en cada justificante</strong>
+          <div class="step-sub">Salen del archivo de reglas del donante; pasa el ratón por encima para ver la descripción y la referencia normativa.</div>
+          <div class="custom-rules-list" id="rulesList"></div>
+        </div>
+        <div class="sub-block">
+          <strong>📊 Aprobado frente a ejecutado por partida</strong>
+          <div class="step-sub">Lo ejecutado se recalcula sumando el listado de gastos, no se toma del informe.</div>
+          <div class="sheet-scroll" id="budgetTable"></div>
+        </div>
+        <div class="sub-block" style="margin-bottom:0;">
+          <strong>🚧 Topes del donante</strong>
+          <div class="sheet-scroll" id="limitsTable"></div>
+        </div>
+      </div>
+    </section>
+
+    <!-- Paso 3 -->
+    <section class="step-card hidden" id="step3">
+      <div class="step-header">
+        <div class="step-title"><span class="step-badge">Paso 3</span><span>Listado de gastos — pulsa en cualquier fila para desplegar toda su información</span></div>
+        <div style="display:flex; gap:8px; flex-wrap:wrap;">
+          <button class="btn" onclick="toggleAll(true)">🔽 Desplegar los visibles</button>
+          <button class="btn" onclick="toggleAll(false)">🔼 Plegar todos</button>
+        </div>
+      </div>
+      <div class="filter-cards">
+        <button class="filter-card active" id="fc-all" onclick="setFilter('all')">
+          <span class="f-num" id="n-all">0</span><span class="f-label">📋 Todos los gastos del informe</span>
+          <span class="f-sub">Haz clic en cualquiera para ver sus detalles</span>
+        </button>
+        <button class="filter-card red" id="fc-review" onclick="setFilter('review')">
+          <span class="f-num" id="n-review" style="color:#b91c1c;">0</span><span class="f-label">🔴 Hay que revisar</span>
+          <span class="f-sub">Gastos con incidencias abiertas</span>
+        </button>
+        <button class="filter-card gray" id="fc-nodoc" onclick="setFilter('nodoc')">
+          <span class="f-num" id="n-nodoc" style="color:#475569;">0</span><span class="f-label">⚪ Sin justificante</span>
+          <span class="f-sub">No se ha encontrado ningún documento para el gasto</span>
+        </button>
+        <button class="filter-card green" id="fc-ok" onclick="setFilter('ok')">
+          <span class="f-num" id="n-ok" style="color:#15803d;">0</span><span class="f-label">🟢 Sin incidencias</span>
+          <span class="f-sub">Tienen justificante y nada pendiente</span>
+        </button>
+      </div>
+      <div class="search-row">
+        <input type="text" class="search-input" id="q" placeholder="🔍 Buscar por nº de orden, proveedor, concepto, partida, factura o archivo…" oninput="resetAndRender()" />
+        <select id="fRule" onchange="resetAndRender()"></select>
+        <select id="fSeverity" onchange="resetAndRender()">
+          <option value="">Gravedad: todas</option><option value="high">🔴 Alta</option><option value="medium">🟠 Media</option><option value="low">🟡 Baja</option>
+        </select>
+        <select id="fStatus" onchange="resetAndRender()">
+          <option value="">Estado de la incidencia: todos</option><option value="open">⏳ Abierta</option><option value="accepted">✅ Aceptada</option><option value="false_positive">🚫 Falso positivo</option>
+        </select>
+        <select id="sort" onchange="resetAndRender()">
+          <option value="review">Ordenar: primero los que hay que revisar</option>
+          <option value="excel">Ordenar: por orden del informe</option>
+          <option value="ok">Ordenar: primero los que no tienen incidencias</option>
+        </select>
+      </div>
+      <div class="step-sub" id="listCount" style="margin-bottom:10px;"></div>
+      <div class="accordion-list" id="list"></div>
+      <div style="text-align:center; margin-top:14px;"><button class="btn hidden" id="moreBtn" onclick="showMore()">Mostrar más gastos</button></div>
+    </section>
+
+    <!-- Paso 4 -->
+    <section class="step-card hidden" id="step4">
+      <div class="step-header">
+        <div class="step-title"><span class="step-badge">Paso 4</span><span>Incidencias generales (presupuesto, topes y documentos sin gasto)</span></div>
+        <span class="step-sub" id="generalCount"></span>
+      </div>
+      <div class="accordion-list" id="generalList"></div>
+    </section>
+  </main>
+
+  <script>
+    "use strict";
+    const state = {
+      pilots: [], key: null, review: null, filter: "all", open: new Set(), limit: 100, poll: null,
+      viewer: { doc: null, page: 1, pages: null, rotation: 0, url: null },
+    };
+    const PAGE = 100;
+    const RANK = { critical: 0, review: 1, confirmed: 2, nodoc: 3, ok: 4, na: 5 };
+    const SEV = { high: "🔴", medium: "🟠", low: "🟡" };
+    const STATUS_ICON = { open: "⏳", accepted: "✅", false_positive: "🚫" };
+
+    const $ = (id) => document.getElementById(id);
+    const esc = (v) => String(v ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
+    const num = (v, d = 2) => (v === null || v === undefined ? "—" : Number(v).toLocaleString("es-ES", { minimumFractionDigits: d, maximumFractionDigits: d }));
+    const dateEs = (v) => (v ? v.slice(0, 10).split("-").reverse().join("/") : null);
+    const read = (v) => (v === null || v === undefined || v === "" ? '<span class="not-read">no leído</span>' : esc(v));
+
+    async function api(path, options) {
+      const r = await fetch("/api" + path, options);
+      if (!r.ok) {
+        let detail = r.statusText;
+        try { detail = (await r.json()).detail || detail; } catch (e) { /* not JSON */ }
+        throw new Error(detail);
+      }
+      return r.json();
+    }
+    function fatal(message) {
+      $("fatal").textContent = message ? "⚠️ " + message : "";
+      $("fatal").classList.toggle("hidden", !message);
+    }
+
+    /* ---------- Paso 1: proyectos y análisis ---------- */
+    async function loadPilots() {
+      const data = await api("/ui/pilots");
+      state.pilots = data.pilots;
+      const pill = $("llmPill");
+      if (data.external_llm) {
+        pill.textContent = `🤖 IA externa activada (${data.llm_provider}${data.llm_model ? " · " + data.llm_model : ""})`;
+        pill.className = "pill medium";
+        pill.title = "La lectura de los PDF envía páginas a un servicio externo.";
+      } else {
+        pill.textContent = "🔒 Todo en local · IA externa desactivada";
+        pill.className = "pill ok";
+        pill.title = "Ningún documento sale de este equipo. La IA externa solo se activa en el archivo .env.";
+      }
+      if (!data.data_dir_available) {
+        $("localNote").className = "notice warn";
+        $("localNote").textContent = "⚠️ DATA_DIR no está definido o no existe: se puede revisar lo ya cargado, pero no lanzar análisis.";
+      }
+      if (!state.key && state.pilots.length) state.key = (state.pilots.find((p) => p.loaded) || state.pilots[0]).key;
+      renderTabs();
+    }
+    function pilot() { return state.pilots.find((p) => p.key === state.key); }
+    function renderTabs() {
+      $("pilotTabs").innerHTML = state.pilots.map((p) => `
+        <button class="country-tab ${p.key === state.key ? "active" : ""}" onclick="selectPilot('${esc(p.key)}')">
+          <span>${esc(p.title)}</span><span class="count-pill">${p.loaded ? p.expenses + " gastos" : "sin analizar"}</span>
+        </button>`).join("");
+      const p = pilot();
+      $("reread").disabled = !p || !p.loaded;
+      if (!p || !p.loaded) $("reread").checked = false;
+    }
+    async function selectPilot(key) {
+      state.key = key; state.review = null; state.open.clear(); state.limit = PAGE; state.filter = "all";
+      renderTabs();
+      showJob(pilot().job);
+      await loadReview();
+    }
+    function showJob(job) {
+      const running = job && job.state === "running";
+      $("runBtn").disabled = running;
+      $("progress").classList.toggle("hidden", !running);
+      const status = $("runStatus");
+      status.className = "run-status" + (job && job.state === "done" ? " ok" : job && job.state === "error" ? " err" : "");
+      if (!job || job.state === "idle") {
+        const p = pilot();
+        status.textContent = p && p.loaded ? "Proyecto ya analizado. Puedes revisarlo o relanzar el análisis." : "Este proyecto aún no se ha analizado: pulsa «Lanzar análisis».";
+      } else if (running) {
+        $("progressBar").style.width = Math.round((job.fraction || 0) * 100) + "%";
+        status.textContent = job.step ? `Paso ${job.step} de ${job.steps} · ${job.message}` : job.message;
+      } else {
+        status.textContent = (job.state === "done" ? "✅ " : "❌ ") + job.message;
+      }
+      if (running && !state.poll) state.poll = setInterval(pollJob, 900);
+    }
+    async function launch() {
+      try {
+        const job = await api(`/ui/pilots/${state.key}/run?reread=${$("reread").checked}`, { method: "POST" });
+        showJob(job);
+      } catch (error) { showJob({ state: "error", message: error.message }); }
+    }
+    async function pollJob() {
+      const key = state.key;
+      let job;
+      try { job = await api(`/ui/pilots/${key}/run`); } catch (error) { return; }
+      if (key !== state.key) return;
+      if (job.state !== "running") {
+        clearInterval(state.poll); state.poll = null;
+        await loadPilots();
+        showJob(job);
+        if (job.state === "done") { $("reread").checked = false; await loadReview(); }
+      } else {
+        showJob(job);
+      }
+    }
+
+    /* ---------- datos del proyecto ---------- */
+    async function loadReview() {
+      const p = pilot();
+      const loaded = p && p.loaded;
+      for (const id of ["step2", "step3", "step4", "excelBtn"]) $(id).classList.toggle("hidden", !loaded);
+      if (!loaded) return;
+      $("excelBtn").href = `/api/ui/pilots/${state.key}/export.xlsx`;
+      try {
+        const [review, budget] = await Promise.all([api(`/ui/pilots/${state.key}/review`), api(`/ui/pilots/${state.key}/budget`)]);
+        state.review = review;
+        fatal("");
+        renderRules(review.rules);
+        renderBudget(budget);
+        fillRuleFilter();
+        renderAll();
+      } catch (error) { fatal("No se han podido cargar los datos del proyecto: " + error.message); }
+    }
+    function allFindings() {
+      const r = state.review;
+      return r.expenses.flatMap((e) => e.findings).concat(r.general_findings);
+    }
+    function fillRuleFilter() {
+      const codes = [...new Set(allFindings().map((f) => f.rule_code))].sort();
+      const labels = state.review.rule_labels;
+      $("fRule").innerHTML = '<option value="">Incidencia: todas</option>' +
+        codes.map((c) => `<option value="${esc(c)}">${esc(labels[c] || c)}</option>`).join("");
+    }
+
+    /* Veredicto de un gasto: mismo criterio que el servidor (app/review_view.py). */
+    function verdictOf(e) {
+      const open = e.findings.filter((f) => f.status === "open");
+      const accepted = e.findings.filter((f) => f.status === "accepted");
+      const s = (n) => (n !== 1 ? "s" : "");
+      if (open.length) return { code: open.some((f) => f.severity === "high") ? "critical" : "review", label: `Revisar · ${open.length} incidencia${s(open.length)}` };
+      if (accepted.length) return { code: "confirmed", label: `${accepted.length} incidencia${s(accepted.length)} confirmada${s(accepted.length)}` };
+      if (e.doc_status === "missing") return { code: "nodoc", label: "Sin justificante" };
+      if (e.documents.length) return { code: "ok", label: "Sin incidencias" };
+      return { code: "na", label: e.doc_status_label };
+    }
+
+    /* ---------- Paso 2 ---------- */
+    function toggleStep2() {
+      const hidden = $("step2Body").classList.toggle("hidden");
+      $("step2Btn").textContent = hidden ? "🔽 Mostrar" : "🔼 Ocultar";
+    }
+    function renderRules(rules) {
+      $("rulesList").innerHTML = rules.length
+        ? rules.map((r) => `<span class="custom-rule-tag" title="${esc(r.description)}${r.reference ? " — " + esc(r.reference) : ""}">${esc(r.label)} <span class="pill">${esc(r.severity_label)}</span></span>`).join("")
+        : '<span class="step-sub">Las reglas se cargan al lanzar el análisis.</span>';
+    }
+    function renderBudget(b) {
+      $("budgetTable").innerHTML = b.partidas.length ? `<table class="sheet-table"><thead><tr>
+          <th>Partida</th><th>Nombre</th><th>Aprobado €</th><th>Ejecutado (listado) €</th><th>Ejecutado (informe) €</th><th>Desviación €</th><th>Desviación %</th><th>Semáforo</th>
+        </tr></thead><tbody>${b.partidas.map((p) => `<tr>
+          <td>${esc(p.code)}</td><td>${esc(p.name)}</td><td class="num">${num(p.approved)}</td><td class="num">${num(p.executed)}</td>
+          <td class="num">${num(p.declared)}</td><td class="num">${num(p.deviation)}</td>
+          <td class="num">${p.deviation_pct === null ? "—" : num(p.deviation_pct * 100, 1) + " %"}</td>
+          <td><span class="tl ${esc(p.traffic)}">${esc(p.traffic)}</span></td></tr>`).join("")}</tbody></table>`
+        : '<div class="empty">Este proyecto no tiene presupuesto cargado.</div>';
+      $("limitsTable").innerHTML = b.limits.length ? `<table class="sheet-table"><thead><tr>
+          <th>Tope</th><th>Descripción</th><th>Ejecutado €</th><th>Porcentaje</th><th>Máximo %</th><th>Máximo €</th><th>Estado</th>
+        </tr></thead><tbody>${b.limits.map((c) => `<tr>
+          <td>${esc(c.code)}</td><td>${esc(c.description)}</td><td class="num">${num(c.executed)}</td>
+          <td class="num">${c.pct === null ? "—" : num(c.pct * 100) + " %"}</td>
+          <td class="num">${c.max_pct === null ? "—" : num(c.max_pct * 100) + " %"}</td>
+          <td class="num">${num(c.max_amount_eur)}</td>
+          <td><span class="tl ${c.exceeded ? "rojo" : "verde"}">${c.exceeded ? "SUPERADO" : "ok"}</span></td></tr>`).join("")}</tbody></table>`
+        : '<div class="empty">Este donante no tiene topes definidos.</div>';
+    }
+
+    /* ---------- Paso 3: lista de gastos ---------- */
+    function setFilter(f) { state.filter = f; resetAndRender(); }
+    function resetAndRender() { state.limit = PAGE; renderAll(); }
+    function showMore() { state.limit += PAGE; renderList(); }
+    function findingPasses(f) {
+      const rule = $("fRule").value, sev = $("fSeverity").value, st = $("fStatus").value;
+      return (!rule || f.rule_code === rule) && (!sev || f.severity === sev) && (!st || f.status === st);
+    }
+    function visibleExpenses() {
+      const q = $("q").value.trim().toLowerCase();
+      const needFinding = $("fRule").value || $("fSeverity").value || $("fStatus").value;
+      let list = state.review.expenses.filter((e) => {
+        const v = e._v.code;
+        if (state.filter === "review" && v !== "critical" && v !== "review") return false;
+        if (state.filter === "nodoc" && e.doc_status !== "missing") return false;
+        if (state.filter === "ok" && v !== "ok") return false;
+        if (needFinding && !e.findings.some(findingPasses)) return false;
+        if (!q) return true;
+        const text = [e.order_no, e.issuer, e.concept, e.partida_code, e.invoice_no, ...e.documents.map((d) => d.filename),
+          ...e.findings.map((f) => f.message + " " + f.rule_code)].join(" ").toLowerCase();
+        return text.includes(q);
+      });
+      const mode = $("sort").value;
+      const row = (e) => e.source_row ?? 1e9;
+      if (mode === "review") list.sort((a, b) => RANK[a._v.code] - RANK[b._v.code] || row(a) - row(b));
+      else if (mode === "ok") list.sort((a, b) => RANK[b._v.code] - RANK[a._v.code] || row(a) - row(b));
+      else list.sort((a, b) => row(a) - row(b));
+      return list;
+    }
+    function renderAll() {
+      const expenses = state.review.expenses;
+      for (const e of expenses) e._v = verdictOf(e);
+      $("n-all").textContent = expenses.length;
+      $("n-review").textContent = expenses.filter((e) => e._v.code === "critical" || e._v.code === "review").length;
+      $("n-nodoc").textContent = expenses.filter((e) => e.doc_status === "missing").length;
+      $("n-ok").textContent = expenses.filter((e) => e._v.code === "ok").length;
+      for (const f of ["all", "review", "nodoc", "ok"]) $("fc-" + f).classList.toggle("active", state.filter === f);
+      renderList();
+      renderGeneral();
+    }
+    function renderList() {
+      const list = visibleExpenses();
+      const shown = list.slice(0, state.limit);
+      $("listCount").textContent = `${list.length} de ${state.review.expenses.length} gastos` + (shown.length < list.length ? ` · mostrando los primeros ${shown.length}` : "");
+      $("moreBtn").classList.toggle("hidden", shown.length >= list.length);
+      $("list").innerHTML = shown.length ? shown.map(expenseHtml).join("") : '<div class="empty">No hay gastos que coincidan con este filtro.</div>';
+    }
+    function expenseHtml(e) {
+      const v = e._v, open = state.open.has(e.id);
+      const cls = { critical: "status-critical", confirmed: "status-critical", review: "status-review", nodoc: "status-nopdf", na: "status-nopdf", ok: "status-ok" }[v.code];
+      const badge = { critical: ["conf-low", "🔴"], confirmed: ["conf-low", "🚨"], review: ["conf-med", "🟡"], nodoc: ["conf-none", "⚪"], na: ["conf-none", "⚪"], ok: ["conf-high", "🟢"] }[v.code];
+      const docs = e.documents;
+      const file = docs.length
+        ? `<span class="file-pill-btn">📄 ${esc(docs[0].filename)}${docs.length > 1 ? ` (+${docs.length - 1} más)` : ""}</span><span class="click-hint">👆 Pulsa para desplegar toda la información</span>`
+        : e.doc_status === "missing"
+          ? `<span class="file-pill-nopdf">❌ No se ha encontrado ningún justificante</span><span class="click-hint">👆 Pulsa para ver los detalles</span>`
+          : `<span class="file-pill-na">➖ ${esc(e.doc_status_label)}</span>`;
+      const nOpen = e.findings.filter((f) => f.status === "open").length;
+      const nDecided = e.findings.length - nOpen;
+      const quick = nOpen
+        ? `<button class="rev-mini-btn" onclick="bulk(${e.id}, 'false_positive')" title="Marca como falso positivo las ${nOpen} incidencias abiertas de este gasto">☑️ Dar por bueno</button>
+           <button class="rev-mini-btn" onclick="bulk(${e.id}, 'accepted')" title="Acepta como reales las ${nOpen} incidencias abiertas de este gasto">🚨 Confirmar</button>`
+        : nDecided ? `<button class="rev-mini-btn ${v.code === "confirmed" ? "active-flag" : "active-ok"}" onclick="bulk(${e.id}, 'open')" title="Vuelve a abrir las incidencias ya decididas de este gasto">↺ Reabrir</button>` : "";
+      const amount = e.amount_local !== null ? `${num(e.amount_local)} ${esc(e.currency || "")} (${num(e.amount_eur)} €)` : `${num(e.amount_eur)} €`;
+      return `
+      <div class="acc-item ${cls} ${open ? "open" : ""}" id="exp-${e.id}">
+        <div class="acc-header" onclick="toggle(${e.id})">
+          <div class="h-excel-main">
+            <div class="h-order-title"><span>${esc(e.order_no || "s/n")} — ${esc(e.issuer || "Sin proveedor")}</span><span class="h-amount-pill">${amount}</span></div>
+            <div class="h-submeta">📅 ${dateEs(e.date) || "s/f"} &nbsp;|&nbsp; 🧾 Factura: <strong>${esc(e.invoice_no || "-")}</strong> &nbsp;|&nbsp; 📂 Partida: <strong>${esc(e.partida_code || "-")}</strong></div>
+          </div>
+          <div class="h-file-trigger">${file}</div>
+          <div class="h-conf-col">
+            <span class="conf-badge ${badge[0]}">${badge[1]} ${esc(v.label)}</span>
+            <span class="h-short-reason">${esc(e.doc_status_label)}${e.confidence_label ? ` · confianza ${esc(e.confidence_label)}` : ""}</span>
+          </div>
+          <div class="h-right-actions" onclick="event.stopPropagation();">${quick}<div class="chevron-box" onclick="toggle(${e.id})" title="Desplegar / ocultar detalles">▼</div></div>
+        </div>
+        ${open ? bodyHtml(e) : ""}
+      </div>`;
+    }
+    function bodyHtml(e) {
+      const docs = e.documents.length ? e.documents.map((d, i) => {
+        const seg = e.segments.find((s) => s.document_id === d.id);
+        return `<div class="pdf-cand-card">
+          <div style="font-size:12px; font-weight:700; color:#334155;">${i === 0 ? "⭐ Documento principal:" : "📎 Otro documento vinculado:"}</div>
+          <div style="font-size:13px; font-weight:800; color:#0f172a; overflow-wrap:anywhere;">${esc(d.filename)}</div>
+          <div style="display:flex; flex-wrap:wrap; gap:5px;">
+            <span class="pill">${esc(d.method_label)}</span>
+            ${d.confidence_label ? `<span class="pill">confianza ${esc(d.confidence_label)}</span>` : ""}
+            <span class="pill ${d.verified ? "ok" : ""}">${d.verified ? "✔ verificado por contenido" : "sin verificar por contenido"}</span>
+          </div>
+          ${d.reason ? `<div style="font-size:12.5px; color:#334155;">${esc(d.reason)}</div>` : ""}
+          ${d.openable ? `<div style="display:flex; gap:6px; flex-wrap:wrap;">
+              <button class="pdf-open-link" onclick="openViewer(${d.id}, ${seg ? seg.pagina_inicio : 1})">👁 Ver ${seg ? "pág. " + seg.pagina_inicio : "documento"}</button>
+              <a class="pdf-open-link sec" href="/api/ui/documents/${d.id}/file" target="_blank" rel="noopener">🔗 Abrir PDF original (${d.pages || "?"} págs.)</a></div>`
+            : `<div class="step-sub">No se puede previsualizar (no es un PDF, está dentro de un .zip o no está en DATA_DIR).</div>`}
+        </div>`;
+      }).join("")
+        : e.doc_status === "missing"
+          ? `<div style="background:#fee2e2; border:1px solid #fca5a5; color:#991b1b; padding:12px; border-radius:8px; font-size:13px; font-weight:700;">❌ No se ha encontrado ningún justificante para este gasto.</div>`
+          : `<div class="step-sub">➖ ${esc(e.doc_status_label)}.</div>`;
+
+      const segments = e.segments.length ? e.segments.map((s) => `
+        <div style="font-size:12.5px; font-weight:700; color:#1d4ed8; overflow-wrap:anywhere;">${esc(s.archivo)} · págs. ${s.pagina_inicio}${s.pagina_fin !== s.pagina_inicio ? "–" + s.pagina_fin : ""} · ${esc(s.tipo.replace("_", " "))}</div>
+        <ul class="detail-list">
+          <li>Emisor: <strong>${read(s.emisor)}</strong>${s.nif ? ` (NIF ${esc(s.nif)})` : ""}</li>
+          <li>Nº de factura: <strong>${read(s.numero_factura)}</strong></li>
+          <li>Fecha: <strong>${read(dateEs(s.fecha))}</strong></li>
+          <li>Importe: <strong>${s.importe === null ? read(null) : num(s.importe) + " " + esc(s.moneda || "")}</strong></li>
+          <li>Nº de orden escrito: <strong>${read(s.numero_orden)}</strong></li>
+          <li>Sello del donante: <strong>${s.sello_donante ? "sí" : "no detectado"}</strong>${s.sello_expediente ? ` · expediente ${esc(s.sello_expediente)}` : ""}${s.sello_porcentaje !== null ? ` · ${num(s.sello_porcentaje, 0)} %` : ""}</li>
+          <li>Prueba de pago: <strong>${s.prueba_pago ? "sí" : "no detectada"}</strong></li>
+          <li>Lectura: <strong>${s.legible ? "legible" : "ilegible"}</strong>${s.confianza_ocr !== null ? ` · confianza ${num(s.confianza_ocr, 0)} %` : ""} · ${esc(s.backend)}</li>
+        </ul>
+        ${s.reason ? `<div style="padding:8px 10px; background:#f8fafc; border-left:3px solid #94a3b8; border-radius:6px; font-size:12px; color:#334155;"><strong>Por qué se vincula${s.confidence_label ? ` (confianza ${esc(s.confidence_label)})` : ""}:</strong> ${esc(s.reason)}</div>` : ""}`).join("")
+        : `<div class="step-sub">${e.documents.length ? "No hay ningún dato leído del documento que respalde este gasto: el vínculo viene solo del nombre del archivo." : "No hay documento que leer."}</div>`;
+
+      const findings = e.findings.length ? e.findings.map(findingHtml).join("") : `<div style="font-size:13px; font-weight:700; color:var(--green);">✅ Ninguna incidencia en este gasto.</div>`;
+      return `<div class="acc-body">
+        <div class="detail-grid">
+          <div class="detail-box"><h4>📎 1. Justificantes vinculados</h4>${docs}</div>
+          <div class="detail-box"><h4>🔎 2. Qué se ha leído dentro del PDF</h4>${segments}</div>
+          <div class="detail-box"><h4>💡 3. Incidencias de este gasto (${e.findings.length})</h4>${findings}</div>
+        </div>
+        <div class="excel-full-details">
+          <span><strong>📋 Concepto en el informe:</strong> ${esc(e.concept || "-")}</span>
+          <span><strong>🎯 Imputado al donante:</strong> ${num(e.amount_donor)} €</span>
+          <span><strong>📂 Partida:</strong> ${esc(e.partida_raw || e.partida_code || "-")}${e.suggested_partida && e.suggested_partida !== e.partida_code ? ` · sugerida <strong>${esc(e.suggested_partida)}</strong>${e.suggested_reason ? ` (${esc(e.suggested_reason)})` : ""}` : ""}</span>
+          <span><strong>💳 Pago:</strong> ${esc(e.payment || "-")}</span>
+          <span><strong>📊 Fila del informe:</strong> ${e.source_row ?? "-"}</span>
+        </div>
+      </div>`;
+    }
+    function findingHtml(f) {
+      const view = f.document_openable
+        ? `<button class="pdf-open-link sec" onclick="openViewer(${f.document_id}, ${f.page || 1}, ${f.page ? "true" : "false"})">👁 Ver en el PDF${f.page ? " (pág. " + f.page + ")" : ""}</button>`
+        : f.document_name ? `<span class="step-sub">${esc(f.document_name)} (no se puede previsualizar)</span>` : "";
+      return `<div class="finding-card sev-${esc(f.severity)} st-${esc(f.status)}" id="finding-${f.id}">
+        <div class="finding-head">
+          <span>${esc(f.label)}</span>
+          <span class="pill ${esc(f.severity)}">${SEV[f.severity] || ""} ${esc(f.severity_label)}</span>
+          <span class="pill ${esc(f.status)}">${STATUS_ICON[f.status] || ""} ${esc(f.status_label)}</span>
+        </div>
+        <div class="finding-msg">${esc(f.message)}</div>
+        ${f.evidence ? `<details><summary>Evidencia (${esc(f.rule_code)})</summary><pre>${esc(JSON.stringify(f.evidence, null, 2))}</pre></details>` : ""}
+        <div class="finding-actions">
+          <input type="text" id="note-${f.id}" placeholder="Nota (opcional)" value="${esc(f.reviewer_note || "")}" onclick="event.stopPropagation()" />
+          ${view}
+        </div>
+        <div class="finding-actions">
+          <button class="rev-mini-btn ${f.status === "accepted" ? "active-flag" : ""}" onclick="decide(${f.id}, 'accepted')" title="La incidencia es real: hay que corregirla o comunicarla.">✅ Aceptar</button>
+          <button class="rev-mini-btn ${f.status === "false_positive" ? "active-ok" : ""}" onclick="decide(${f.id}, 'false_positive')" title="La herramienta se ha equivocado.">🚫 Falso positivo</button>
+          <button class="rev-mini-btn" onclick="decide(${f.id}, 'open')">↺ Reabrir</button>
+        </div>
+      </div>`;
+    }
+    function toggle(id) { state.open.has(id) ? state.open.delete(id) : state.open.add(id); renderList(); }
+    function toggleAll(expand) {
+      state.open.clear();
+      if (expand) for (const e of visibleExpenses().slice(0, state.limit)) state.open.add(e.id);
+      renderList();
+    }
+
+    /* ---------- decisiones ---------- */
+    function findFinding(id) { return allFindings().find((f) => f.id === id); }
+    async function patch(f, status, note) {
+      const updated = await api(`/findings/${f.id}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ status, reviewer_note: note }) });
+      const labels = { open: "abierta", accepted: "aceptada", false_positive: "falso positivo" };
+      f.status = updated.status; f.status_label = labels[updated.status]; f.reviewer_note = updated.reviewer_note;
+    }
+    async function decide(id, status) {
+      const f = findFinding(id);
+      const input = $("note-" + id);
+      try { await patch(f, status, input ? input.value : null); fatal(""); } catch (error) { fatal("No se ha podido guardar la decisión: " + error.message); }
+      renderAll();
+    }
+    async function bulk(expenseId, status) {
+      const e = state.review.expenses.find((x) => x.id === expenseId);
+      const targets = e.findings.filter((f) => (status === "open" ? f.status !== "open" : f.status === "open"));
+      try { for (const f of targets) await patch(f, status, null); fatal(""); } catch (error) { fatal("No se ha podido guardar la decisión: " + error.message); }
+      renderAll();
+    }
+
+    /* ---------- Paso 4: incidencias generales ---------- */
+    function renderGeneral() {
+      const all = state.review.general_findings;
+      const q = $("q").value.trim().toLowerCase();
+      const list = all.filter((f) => findingPasses(f) && (!q || (f.message + " " + f.rule_code + " " + (f.document_name || "")).toLowerCase().includes(q)));
+      $("generalCount").textContent = `${list.length} de ${all.length} · usan los mismos filtros de incidencia y el buscador del paso 3`;
+      $("generalList").innerHTML = list.length ? list.map(findingHtml).join("") : '<div class="empty">No hay incidencias generales con estos filtros.</div>';
+      $("step4").classList.toggle("hidden", !all.length);
+    }
+
+    /* ---------- visor de PDF ---------- */
+    function documentName(documentId) {
+      for (const e of state.review.expenses) {
+        const d = e.documents.find((x) => x.id === documentId);
+        if (d) return d.filename;
+      }
+      const f = allFindings().find((x) => x.document_id === documentId);
+      return f ? f.document_name : "Documento";
+    }
+    function openViewer(documentId, page, exactPage) {
+      state.viewer = { doc: documentId, page: page || 1, pages: null, rotation: 0, url: null };
+      $("viewerTitle").textContent = "📄 " + documentName(documentId);
+      $("viewerOpen").href = `/api/ui/documents/${documentId}/file`;
+      $("viewerNote").textContent = exactPage ? `La incidencia apunta a la página ${page}.` : "";
+      $("viewer").classList.add("show");
+      loadPage();
+    }
+    function closeViewer() {
+      $("viewer").classList.remove("show");
+      if (state.viewer.url) URL.revokeObjectURL(state.viewer.url);
+      $("viewerBody").innerHTML = "";
+    }
+    async function loadPage() {
+      const v = state.viewer;
+      $("viewerPage").textContent = "Cargando…";
+      try {
+        const r = await fetch(`/api/ui/documents/${v.doc}/page/${v.page}.png?rotation=${v.rotation}`);
+        if (!r.ok) { let d = r.statusText; try { d = (await r.json()).detail || d; } catch (e) { /* not JSON */ } throw new Error(d); }
+        v.pages = Number(r.headers.get("X-Pages")) || v.pages;
+        if (v.url) URL.revokeObjectURL(v.url);
+        v.url = URL.createObjectURL(await r.blob());
+        $("viewerBody").innerHTML = `<img src="${v.url}" alt="Página ${v.page}" />`;
+        $("viewerPage").textContent = `Página ${Math.min(v.page, v.pages || v.page)} de ${v.pages || "?"}`;
+      } catch (error) {
+        $("viewerBody").innerHTML = `<div class="empty">⚠️ ${esc(error.message)}</div>`;
+        $("viewerPage").textContent = "";
+      }
+    }
+    function viewerStep(delta) {
+      const v = state.viewer;
+      const next = v.page + delta;
+      if (next < 1 || (v.pages && next > v.pages)) return;
+      v.page = next; loadPage();
+    }
+    function viewerRotate() { state.viewer.rotation = (state.viewer.rotation + 90) % 360; loadPage(); }
+    document.addEventListener("keydown", (ev) => { if (ev.key === "Escape") closeViewer(); });
+
+    /* ---------- arranque ---------- */
+    (async function init() {
+      try {
+        await loadPilots();
+        if (pilot()) { showJob(pilot().job); await loadReview(); }
+      } catch (error) {
+        fatal("No hay conexión con el servidor o con PostgreSQL (" + error.message + "). Arranca la base de datos con «docker compose up -d db».");
+      }
+    })();
+  </script>
+</body>
+</html>

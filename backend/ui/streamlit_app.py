@@ -30,29 +30,8 @@ from app.pipeline.budget import TRAFFIC_LABELS_ES, compute_execution  # noqa: E4
 from app.pipeline.export import export_project_xlsx  # noqa: E402
 from app.pipeline.run import PILOTS, STEPS, PilotProject, run_pipeline  # noqa: E402
 from app.review import FindingLocation, list_findings, locate, set_decision  # noqa: E402
+from app.review_view import RULE_LABELS_ES  # noqa: E402
 
-RULE_LABELS_ES = {
-    "DOC_MISSING": "Gasto sin justificante",
-    "NAME_CONTENT_CONFLICT": "El nombre del archivo no coincide con su contenido",
-    "SEGMENT_ORPHAN": "Documento que no justifica ningún gasto",
-    "MATCH_AMBIGUOUS": "Justificante dudoso (encaja con varios gastos)",
-    "ORDER_NUMBER_MISMATCH": "Nº de orden del documento distinto al del gasto",
-    "DOC_ORPHAN": "Archivo sin gasto asociado",
-    "DOC_DUPLICATE": "Archivo duplicado",
-    "AMOUNT_MISMATCH": "El importe no coincide",
-    "DATE_MISMATCH": "La fecha no coincide",
-    "DONOR_STAMP_MISSING": "Falta el sello del donante",
-    "NOT_AN_INVOICE": "No es una factura válida",
-    "PAYMENT_EVIDENCE_MISSING": "Falta la prueba de pago",
-    "CASH_OVER_LIMIT": "Pago en efectivo por encima del límite",
-    "ILLEGIBLE": "Documento ilegible",
-    "DUPLICATE_INVOICE": "Factura duplicada",
-    "DOC_INCOMPLETE": "Expediente incompleto",
-    "LIMIT_EXCEEDED": "Tope del donante superado",
-    "BUDGET_DEVIATION": "Desviación respecto al presupuesto",
-    "EXECUTED_REPORT_MISMATCH": "Ejecutado del informe no cuadra con el listado",
-    "PARTIDA_MISMATCH": "Gasto posiblemente imputado en otra partida",
-}
 SEVERITY_ICONS = {
     Severity.HIGH: "🔴 " + SEVERITY_LABELS_ES[Severity.HIGH],
     Severity.MEDIUM: "🟠 " + SEVERITY_LABELS_ES[Severity.MEDIUM],
