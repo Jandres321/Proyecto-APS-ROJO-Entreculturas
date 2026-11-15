@@ -144,10 +144,15 @@ class CheckContext:
     # Execution period of the project (start, end); either end may be None. None = no period known,
     # so DATE_OUT_OF_PERIOD does not apply.
     period: tuple[dt.date | None, dt.date | None] | None = None
+    # Código / nº de expediente del proyecto, para compararlo con el del sello.
+    # None: no se compara.
+    project_code: str | None = None
 
 
 def _money(value: Decimal | None, currency: str | None = None) -> str:
-    return f"{fmt_amount(value)} {currency}".strip() if value is not None else "importe desconocido"
+    if value is None:
+        return "importe desconocido"
+    return f"{fmt_amount(value)} {currency or ''}".strip()
 
 
 def _date(value: dt.date | None) -> str:
@@ -198,7 +203,9 @@ def unreliable_reading(exp: ExpenseFacts, seg: Seg, params: dict[str, Any]) -> s
     (None = no reason to doubt it): the document is linked to the expense with high/medium
     confidence, or the OCR confidence is low. Thresholds come from the rule's params."""
     floor = params.get("soft_below_ocr_confidence", 70)
-    trusted = set(params.get("soft_link_confidences", ["high", "medium"]))
+    # Un vínculo de confianza alta/media ya no rebaja nada por defecto: si el documento
+    # contradice el listado, eso es un hallazgo aunque el vínculo sea fiable.
+    trusted = set(params.get("soft_link_confidences") or [])
     if exp.link_confidence in trusted:
         return "el documento está asignado con confianza alta/media"
     if seg.confianza_ocr is not None and seg.confianza_ocr < floor:
@@ -209,8 +216,8 @@ def unreliable_reading(exp: ExpenseFacts, seg: Seg, params: dict[str, Any]) -> s
 def soften(message: str, why: str) -> str:
     """Turn a finding message into a "check the reading" one (used with `unreliable_reading`)."""
     return (
-        f"Revisar la lectura: {message[0].lower()}{message[1:]} Probablemente sea un error de "
-        f"lectura del OCR, porque {why}; compruébalo en el PDF."
+        f"Revisar la lectura: {message[0].lower()}{message[1:]} La lectura es dudosa porque "
+        f"{why}; compruébalo en el PDF."
     )
 
 
@@ -364,5 +371,9 @@ def build_context(session: Session, project_id: int) -> CheckContext:
                 bundle[sib.id] = sib
         cases.append(Case(exp, own, sorted(bundle.values(), key=lambda s: s.id)))
     return CheckContext(
-        load_rules(project.donor), cases, dict(expenses_of), project_period(project)
+        load_rules(project.donor),
+        cases,
+        dict(expenses_of),
+        project_period(project),
+        project_code=project.code or None,
     )

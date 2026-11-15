@@ -1,4 +1,5 @@
-"""DATE_OUT_OF_PERIOD: document and payment dates inside the project's execution period."""
+"""DATE_OUT_OF_PERIOD: listing, document and payment dates inside the project's execution
+period."""
 
 import datetime as dt
 
@@ -36,7 +37,8 @@ def _period_text(period: tuple[dt.date | None, dt.date | None]) -> str:
 
 
 def _check_period(ctx: CheckContext, case: Case) -> list[FindingIn]:
-    """DATE_OUT_OF_PERIOD: document date and payment date inside the project's period."""
+    """DATE_OUT_OF_PERIOD: listing date (always, even without documents), document date and
+    payment date inside the project's period."""
     rule = ctx.rules.applies(DATE_OUT_OF_PERIOD, case.expense.partida_code)
     if rule is None or ctx.period is None:
         return []
@@ -70,6 +72,27 @@ def _check_period(ctx: CheckContext, case: Case) -> list[FindingIn]:
         )
 
     grace = params.get("document_grace_days", 0)
+    # La fecha del gasto en el listado se comprueba siempre, tenga o no documentos leídos:
+    # es un dato del propio listado, no depende del OCR.
+    if exp.date and (side := _outside(exp.date, period, grace)):
+        out.append(
+            _finding(
+                rule,
+                case,
+                f"La fecha del gasto {exp.ref} en el listado ({_date(exp.date)}) es "
+                f"{verdict[side]} del periodo de ejecución del proyecto "
+                f"({_period_text(period)}): el gasto no sería subvencionable.",
+                severity=Severity.HIGH,
+                subject="fecha_listado",
+                fecha=exp.date.isoformat(),
+                tipo_fecha="del listado",
+                posicion=side,
+                periodo_inicio=period[0].isoformat() if period[0] else None,
+                periodo_fin=period[1].isoformat() if period[1] else None,
+                lectura_dudosa=False,
+            )
+        )
+
     dated = [s for s in case.linked if s.tipo in _types(params) and s.fecha]
     outside = [(s, _outside(s.fecha, period, grace)) for s in dated]
     if dated and all(side for _, side in outside):

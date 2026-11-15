@@ -425,17 +425,35 @@ def find_stamp(text: str) -> Stamp:
 
 
 # ---------------------------------------------------------------- payment proof
+# Señales fuertes: por sí solas indican que el pago se hizo.
 _PAYMENT = re.compile(
-    r"pagado|cancelado|\bpaid\b|\bpaye\b|recibi conforme|received with thanks|cash received|"
-    r"payment received|transferencia|\bswift\b|cheque|abonado|comprobante de pago|"
-    r"se cancela|con esta fecha|recibimos de"
+    r"pagado|cancelado|\bpaid\b|recibi conforme|received with thanks|cash received|"
+    r"payment received|abonado|comprobante de pago|se cancela|recibimos de|"
+    r"(?:justificante|comprobante|resguardo|recibo) de (?:la )?transferencia|"
+    r"\bn(?:o|º|°|um|umero)?\.? ?de operacion|referencia bancaria|"
+    r"transaction (?:reference|id)|\bmt ?103\b"
 )
+# Señales débiles: solo cuentan si no están en una cláusula de condiciones de pago
+# («Forma de pago: transferencia a 30 días» no prueba que se haya pagado).
+_PAYMENT_WEAK = re.compile(r"transferencia|cheque|efectivo")
+_PAYMENT_TERMS = re.compile(
+    r"(?:forma|condiciones|condicion|modo|metodo|medio)s? de pago|payment (?:terms|method)|"
+    r"terms of payment|\ba \d+ dias\b|\b\d+ days\b|\bnet \d+\b|vencimiento|"
+    r"datos bancarios|bank details|para (?:la )?transferencia|a pagar|due date"
+)
+_CLAUSE = re.compile(r"[\n;.]+")
 
 
 def has_payment_proof(text: str, tipo: TipoSegmento) -> bool:
     if tipo in (TipoSegmento.TRANSFERENCIA, TipoSegmento.RECIBO):
         return True
-    return bool(_PAYMENT.search(normalize(text)))
+    if _PAYMENT.search(normalize(text)):
+        return True
+    for clause in _CLAUSE.split(text or ""):
+        norm = normalize(clause)
+        if _PAYMENT_WEAK.search(norm) and not _PAYMENT_TERMS.search(norm):
+            return True
+    return False
 
 
 # ------------------------------------------------- social-security contribution

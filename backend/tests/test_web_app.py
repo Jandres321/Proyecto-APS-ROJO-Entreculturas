@@ -11,7 +11,6 @@ import pytest
 from app.enums import (
     Confidence,
     Donor,
-    FindingStatus,
     JobState,
     MatchMethod,
     Severity,
@@ -173,58 +172,39 @@ def test_review_groups_documents_readings_and_findings_by_expense(db_session, pr
 # --- analysis report (database) ---
 
 
-def test_the_report_has_one_row_per_expense_with_what_was_really_read(
+def test_the_report_carries_the_verdict_reasons_and_decisions_end_to_end(
     db_session, project, tmp_path
 ):
+    """The workbook is built from the same view as the web app (detailed tests of its sheets
+    are in test_review_export.py)."""
     from openpyxl import load_workbook
 
+    from app.enums import ReviewDecision
     from app.pipeline.report import export_report_xlsx
-    from app.review import set_decision
+    from app.services.decisions import set_expense_decision
 
     with_doc, without, doc, own, general = fill(db_session, project)
-    set_decision(db_session, own.id, FindingStatus.ACCEPTED, "Pedir el sello al socio")
+    set_expense_decision(db_session, with_doc.id, ReviewDecision.REAL_ISSUE, "Pedir el sello")
     book = load_workbook(export_report_xlsx(db_session, project.id, tmp_path / "informe.xlsx"))
-    assert book.sheetnames == [
-        "Resumen",
-        "Análisis por gasto",
-        "Incidencias",
-        "Presupuesto",
-        "Topes",
-    ]
+    assert book.sheetnames[:3] == ["Resumen", "Análisis por gasto", "Requerimientos"]
 
     sheet = book["Análisis por gasto"]
     header = [c.value for c in sheet[1]]
     first, second = (
         dict(zip(header, [c.value for c in row], strict=True)) for row in sheet.iter_rows(min_row=2)
     )
-    # (transitional columns: the workbook is being redone for the new verdict)
-    assert (first["Nº orden"], first["Semáforo"], first["Veredicto"]) == (
+    assert (first["Nº orden"], first["Estado"], first["Decisión del revisor"]) == (
         "1",
-        "amarillo",
         "Necesita revisión",
+        "Incidencia real",
     )
-    assert first["Documentos vinculados"] == "1. Factura.pdf"
-    assert first["Verificado por contenido"] == "sí"
-    assert first["Leído: importe"] == "1,500.00 UGX"
-    # not read inside the PDF: empty, never the listing's value
-    assert first["Leído: emisor"] is None and first["Leído: fecha"] is None
-    assert first["Leído: sello del donante"] == "no"
-    assert (first["Incidencias abiertas"], first["Incidencias aceptadas"]) == (0, 1)
-    assert "Falta el sello del donante: Falta el sello." in first["Detalle de las incidencias"]
-    assert "nota: Pedir el sello al socio" in first["Detalle de las incidencias"]
-
-    assert (second["Nº orden"], second["Semáforo"], second["Veredicto"]) == (
-        "2",
-        "amarillo",
-        "Necesita revisión",
-    )
-    # nothing was read for an expense without document: the cells stay empty, not "no"
-    assert second["Leído: sello del donante"] is None and second["Documentos vinculados"] is None
-
-    summary = {row[0].value: row[1].value for row in book["Resumen"].iter_rows(min_row=2)}
-    assert summary["Gastos del informe"] == 2 and summary["Gastos que necesitan revisión"] == 2
-    assert summary["Incidencias aceptadas (reales)"] == 1 and summary["Incidencias abiertas"] == 1
-    assert summary["   · Desviación respecto al presupuesto"] == 1
+    assert first["Nota del revisor"] == "Pedir el sello"
+    assert "Falta el sello del donante" in first["Motivos"]
+    assert second["Estado"] == "Necesita revisión"
+    assert second["Motivos"].startswith("[bloqueante] Sin justificante")
+    # both go to the partner: one confirmed as a real issue, one with a blocking reason
+    requests = book["Requerimientos"]
+    assert requests.max_row == 3
 
 
 # --- project API (database) ---
@@ -252,10 +232,10 @@ def test_api_serves_projects_review_budget_and_excel(db_session, project, api):
 
     excel = api.get("/api/projects/web/export.xlsx")
     assert excel.status_code == 200 and excel.content[:2] == b"PK"
-    assert "WEB-1_revision.xlsx" in excel.headers["content-disposition"]
+    assert "WEB-1_datos_tecnicos.xlsx" in excel.headers["content-disposition"]
     report = api.get("/api/projects/web/report.xlsx")
     assert report.status_code == 200 and report.content[:2] == b"PK"
-    assert "WEB-1_informe_analisis_" in report.headers["content-disposition"]
+    assert "WEB-1_revision_" in report.headers["content-disposition"]
 
     assert api.get("/api/projects/otro/review").status_code == 404
 

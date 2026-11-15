@@ -1,13 +1,17 @@
-"""Reviewer workflow (decisions, document/page location, API) and the Excel export, on invented
-data in the (rolled back) database."""
+"""Reviewer workflow (decisions, document/page location, API), the technical Excel export and the
+analysis report (`report.py`), on invented data. Database tests run in a rolled-back transaction;
+the report's sheets are also checked without a database, from a hand-made review view."""
 
+import datetime as dt
 from decimal import Decimal
 
+import pandas as pd
 import pytest
 from openpyxl import load_workbook
 
 from app.enums import Confidence, Donor, FindingStatus, MatchMethod, Severity
 from app.models import BudgetLine, Document, Expense, ExpenseDocument, Finding, Project, Segmento
+from app.pipeline import report
 from app.pipeline.budget import RULE_BUDGET_DEVIATION, RULE_LIMIT_EXCEEDED, run_budget
 from app.pipeline.export import export_project_xlsx
 from app.review import list_findings, locate, set_decision
@@ -342,3 +346,299 @@ def test_export_gastos_sheet_shows_the_document_status(db_session, project, tmp_
         "Sin justificante",
     ]
     assert [r["Confianza del vínculo"] for r in rows] == ["media", None]
+
+
+# --- analysis report (report.py) ---
+#
+# The view is built by hand with the fields of the new review criterion (verdict Bien / Necesita
+# revisión / No aplica, reasons and a decision per expense), so these tests do not depend on how
+# `review_view.project_review` computes them.
+
+BLOCKING = {"code": "DOC_MISSING", "label": "Sin justificante", "blocking": True}
+NOT_READ = {"code": "NOT_READ_AMOUNT", "label": "No leído: importe", "blocking": False}
+NAME_ONLY = {"code": "NAME_ONLY", "label": "Solo emparejado por el nombre", "blocking": False}
+VERDICTS = {"ok": "Bien", "review": "Necesita revisión", "na": "No aplica"}
+
+
+def report_expense(order_no, verdict="review", reasons=(), status="pending", note=None, **kw):
+    """One expense of `project_review(...)["expenses"]` with the new fields."""
+    expense = {
+        "id": kw.pop("id", hash(order_no) % 10_000),
+        "order_no": order_no,
+        "source_row": kw.pop("source_row", 10),
+        "date": "2024-03-01",
+        "issuer": kw.pop("issuer", f"Proveedor {order_no}"),
+        "concept": "Concepto inventado",
+        "partida_code": "A.III",
+        "partida_raw": "A.III",
+        "amount_local": None,
+        "currency": "EUR",
+        "amount_eur": kw.pop("amount_eur", 100.0),
+        "amount_donor": None,
+        "invoice_no": None,
+        "payment": None,
+        "suggested_partida": None,
+        "suggested_reason": None,
+        "doc_status": "missing",
+        "doc_status_label": "Sin justificante",
+        "confidence_label": None,
+        "documents": [],
+        "segments": [],
+        "findings": [],
+        "verdict": {"code": verdict, "label": VERDICTS[verdict]},
+        "reasons": list(reasons),
+        "decision": {
+            "status": status,
+            "note": note,
+            "decided_at": kw.pop(
+                "decided_at", None if status == "pending" else "2026-11-15T12:00:00"
+            ),
+        },
+    }
+    expense.update(kw)
+    return expense
+
+
+def report_view(expenses, general_findings=()):
+    review = [e for e in expenses if e["verdict"]["code"] == "review"]
+    return {
+        "project": {
+            "id": 1, "name": "Proyecto inventado", "code": "INV-1", "donor": "xunta",
+            "expenses": len(expenses), "documents": 3,
+            "findings": {"open": 0, "accepted": 0, "false_positive": 0},
+        },
+        "expenses": list(expenses),
+        "general_findings": list(general_findings),
+        "rule_labels": {},
+        "counts": {
+            "pending": sum(e["decision"]["status"] == "pending" for e in review),
+            "reviewed": sum(e["decision"]["status"] != "pending" for e in review),
+            "ok": sum(e["verdict"]["code"] == "ok" for e in expenses),
+            "na": sum(e["verdict"]["code"] == "na" for e in expenses),
+        },
+    }  # fmt: skip
+
+
+def sample_expenses():
+    """Two partners (CG, FA), an expense without partner and every state / decision."""
+    return [
+        report_expense("FA10", "review", [BLOCKING, NOT_READ], amount_eur=40.0, id=1),
+        report_expense("CG12.3", "review", [NOT_READ], "real_issue", "Pedir el original", id=2,
+                       amount_eur=25.5),
+        report_expense("FA2", "review", [NAME_ONLY], "correct", "Revisado en el PDF", id=3,
+                       amount_eur=10.0),
+        report_expense("7", "review", [BLOCKING], id=4, amount_eur=5.0),
+        report_expense("FA236.3", "ok", id=5, amount_eur=1000.0),
+        report_expense("CG1", "na", id=6, amount_eur=300.0),
+        report_expense("FA3", "review", [BLOCKING], "correct", "Consta en otra carpeta", id=7,
+                       amount_eur=2.0),
+    ]  # fmt: skip
+
+
+@pytest.mark.parametrize(
+    ("order_no", "partner"),
+    [
+        ("CG12.3", "CG"), ("FA236.3", "FA"), ("ec-5", "EC"), (" CG 14", "CG"),
+        ("12", "Sin socio"), ("N/A", "Sin socio"), ("s/n", "Sin socio"), (None, "Sin socio"),
+        ("", "Sin socio"),
+    ],
+)  # fmt: skip
+def test_the_partner_is_the_letter_prefix_of_the_order_number(order_no, partner):
+    assert report.partner_of(order_no) == partner
+
+
+def test_reasons_are_joined_and_blocking_ones_marked():
+    assert report.reasons_text([BLOCKING, NOT_READ]) == (
+        "[bloqueante] Sin justificante; No leído: importe"
+    )
+    assert report.reasons_text([]) is None and report.reasons_text(None) is None
+
+
+def test_report_filename_uses_the_code_and_the_date():
+    day = dt.date(2026, 11, 15)
+    project = Project(name="x", donor=Donor.AECID, code="22-PY-136", key="paraguay")
+    assert report.report_filename(project, day) == "22-PY-136_revision_2026-11-15.xlsx"
+    project.code = "2019/PRYC/1234"  # not valid in a file name
+    assert report.report_filename(project, day) == "2019-PRYC-1234_revision_2026-11-15.xlsx"
+    project.code = None
+    assert report.report_filename(project, day) == "paraguay_revision_2026-11-15.xlsx"
+    assert report.report_filename(project).endswith(f"_{dt.date.today().isoformat()}.xlsx")
+
+
+def test_expense_sheet_starts_with_state_reasons_and_decision():
+    table = report.expense_table(sample_expenses())
+    assert list(table.columns[:5]) == [
+        "Estado",
+        "Motivos",
+        "Decisión del revisor",
+        "Nota del revisor",
+        "Fecha de la decisión",
+    ]
+    assert "Semáforo" not in table.columns and "Veredicto" not in table.columns
+    assert {"Nº orden", "Fecha", "Proveedor", "Importe €", "Documentos vinculados",
+            "Leído: importe", "Archivo y página"} <= set(table.columns)  # fmt: skip
+    rows = table.set_index("Nº orden")
+    assert rows.loc["FA10", "Estado"] == "Necesita revisión"
+    assert rows.loc["FA10", "Motivos"] == "[bloqueante] Sin justificante; No leído: importe"
+    assert rows.loc["FA10", "Decisión del revisor"] == "Pendiente"
+    assert rows.loc["CG12.3", "Decisión del revisor"] == "Incidencia real"
+    assert rows.loc["CG12.3", "Nota del revisor"] == "Pedir el original"
+    assert rows.loc["CG12.3", "Fecha de la decisión"] == dt.datetime(2026, 11, 15, 12, 0)
+    assert rows.loc["FA236.3", "Estado"] == "Bien"
+    assert pd.isna(rows.loc["FA236.3", "Decisión del revisor"])  # nothing pending on a «Bien»
+    assert rows.loc["CG1", "Estado"] == "No aplica"
+
+
+def test_expense_sheet_shows_where_to_look():
+    expense = report_expense(
+        "FA1",
+        documents=[{"filename": "FA1.pdf", "verified": False, "reason": "Por el nombre"}],
+        segments=[
+            {"archivo": "carpeta/FA1.pdf", "pagina_inicio": 2, "pagina_fin": 3, "importe": 50.0,
+             "moneda": "PYG", "emisor": None, "numero_factura": None, "fecha": None,
+             "sello_donante": False, "prueba_pago": True, "legible": True},
+        ],
+    )  # fmt: skip
+    (row,) = report.expense_table([expense]).to_dict("records")
+    assert row["Archivo y página"] == "FA1.pdf, págs. 2-3"
+    assert row["Leído: importe"] == "50.00 PYG" and row["Leído: emisor"] is None
+    assert row["Verificado por contenido"] == "no"
+    (row,) = report.expense_table(
+        [
+            report_expense(
+                "FA2", documents=[{"filename": "FA2.pdf", "verified": True, "reason": None}]
+            )
+        ]
+    ).to_dict("records")
+    assert row["Archivo y página"] == "FA2.pdf"  # nothing read: the linked file
+
+
+def test_summary_counts_expenses_and_euros_per_state():
+    general = [{"status": "open"}, {"status": "accepted"}]
+    table = report.summary_table(report_view(sample_expenses(), general))
+    rows = {r["Indicador"]: (r["Valor"], r["Importe €"]) for r in table.to_dict("records")}
+    assert rows["Gastos del informe"] == (7, 1382.5)
+    assert rows["Bien"] == (1, 1000.0)
+    assert rows["Necesita revisión"] == (5, 82.5)
+    assert rows["   · pendientes de decisión"] == (2, 45.0)
+    assert rows["   · revisados"] == (3, 37.5)
+    assert rows["      · Correcto"] == (2, 12.0)
+    assert rows["      · Incidencia real"] == (1, 25.5)
+    assert rows["No aplica"] == (1, 300.0)
+    assert rows["Gastos con algún motivo bloqueante"] == (3, 47.0)
+    assert rows["   · Sin justificante"][0] == 3 and rows["   · No leído: importe"][0] == 2
+    assert rows["Incidencias generales abiertas (presupuesto, topes, documentos sin gasto)"][0] == 1
+
+
+def test_an_unknown_verdict_is_never_counted_as_fine():
+    odd = report_expense("FA9", "review")
+    odd["verdict"] = {"code": "critical", "label": "Revisar · 1 incidencia"}
+    odd.pop("decision")
+    odd.pop("reasons")
+    rows = {r["Indicador"]: r["Valor"] for r in report.summary_table(report_view([odd]))
+            .to_dict("records")}  # fmt: skip
+    assert (rows["Necesita revisión"], rows["   · pendientes de decisión"], rows["Bien"]) == (
+        1,
+        1,
+        0,
+    )
+
+
+def test_requirements_are_real_issues_and_blocking_reasons_grouped_by_partner():
+    table = report.requirements_table(sample_expenses())
+    assert list(table.columns) == [
+        "Socio",
+        "Nº orden",
+        "Proveedor",
+        "Importe €",
+        "Qué falta o hay que corregir",
+    ]
+    rows = table.to_dict("records")
+    # CG first, then FA, "Sin socio" last. Not included: Bien (FA236.3), No aplica (CG1), a
+    # "Correcto" without blocking reasons (FA2) and a blocking reason judged "Correcto" (FA3).
+    assert [(r["Socio"], r["Nº orden"]) for r in rows] == [
+        ("CG", "CG12.3"),
+        ("FA", "FA10"),
+        ("Sin socio", "7"),
+    ]
+    assert rows[0]["Qué falta o hay que corregir"] == (
+        "No leído: importe. Nota del revisor: Pedir el original"
+    )
+    assert rows[1]["Qué falta o hay que corregir"] == (
+        "[bloqueante] Sin justificante; No leído: importe"
+    )
+    assert rows[1]["Proveedor"] == "Proveedor FA10" and rows[1]["Importe €"] == 40.0
+
+
+def test_requirements_follow_the_natural_order_of_the_order_numbers():
+    expenses = [report_expense(n, reasons=[BLOCKING]) for n in ("FA10", "FA9", "FA236.10",
+                                                               "FA236.2")]  # fmt: skip
+    orders = list(report.requirements_table(expenses)["Nº orden"])
+    assert orders == ["FA9", "FA10", "FA236.2", "FA236.10"]
+
+
+def test_requirements_of_a_project_with_nothing_to_ask_is_an_empty_sheet():
+    table = report.requirements_table([report_expense("FA1", "ok")])
+    assert table.empty and list(table.columns)[0] == "Socio"
+
+
+def test_report_workbook_has_the_new_sheets(db_session, project, tmp_path, monkeypatch):
+    monkeypatch.setattr(report, "project_review", lambda session, p: report_view(sample_expenses()))
+    out = report.export_report_xlsx(db_session, project.id, tmp_path / "sub" / "informe.xlsx")
+    book = load_workbook(out)
+    assert book.sheetnames == [
+        "Resumen",
+        "Análisis por gasto",
+        "Requerimientos",
+        "Incidencias",
+        "Presupuesto",
+        "Topes",
+    ]
+
+    def records(name):
+        sheet = book[name]
+        header = [c.value for c in sheet[1]]
+        return header, [
+            dict(zip(header, [c.value for c in row], strict=True))
+            for row in sheet.iter_rows(min_row=2)
+        ]
+
+    header, rows = records("Análisis por gasto")
+    assert header[:5] == [
+        "Estado",
+        "Motivos",
+        "Decisión del revisor",
+        "Nota del revisor",
+        "Fecha de la decisión",
+    ]
+    assert "Semáforo" not in header and "Veredicto" not in header and len(rows) == 7
+    real = next(r for r in rows if r["Nº orden"] == "CG12.3")
+    assert real["Fecha de la decisión"] == dt.datetime(2026, 11, 15, 12, 0)
+    pending = next(r for r in rows if r["Nº orden"] == "FA10")
+    assert (pending["Decisión del revisor"], pending["Fecha de la decisión"]) == ("Pendiente", None)
+
+    header, rows = records("Requerimientos")
+    assert header == ["Socio", "Nº orden", "Proveedor", "Importe €", "Qué falta o hay que corregir"]
+    assert [(r["Socio"], r["Nº orden"]) for r in rows] == [
+        ("CG", "CG12.3"),
+        ("FA", "FA10"),
+        ("Sin socio", "7"),
+    ]
+
+    summary = {r[0].value: (r[1].value, r[2].value) for r in book["Resumen"].iter_rows(min_row=2)}
+    assert summary["Bien"] == (1, 1000) and summary["No aplica"] == (1, 300)
+    assert summary["   · pendientes de decisión"] == (2, 45)
+    assert summary["      · Incidencia real"] == (1, 25.5)
+
+
+def test_report_of_a_project_without_expenses_still_writes_every_sheet(
+    db_session, project, tmp_path, monkeypatch
+):
+    monkeypatch.setattr(report, "project_review", lambda session, p: report_view([]))
+    book = load_workbook(report.export_report_xlsx(db_session, project.id, tmp_path / "v.xlsx"))
+    assert "Requerimientos" in book.sheetnames and book["Requerimientos"].max_row == 1
+
+
+def test_report_unknown_project(db_session, tmp_path):
+    with pytest.raises(LookupError):
+        report.export_report_xlsx(db_session, 0, tmp_path / "x.xlsx")

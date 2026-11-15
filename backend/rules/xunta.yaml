@@ -29,7 +29,7 @@ rules:
       tolerance_pct: 0.01                              # 1 % (redondeos, tipo de cambio)
       tolerance_abs: 1                                 # o 1 unidad de la moneda
       soft_below_ocr_confidence: 70       # lectura con OCR por debajo de esto: severidad baja
-      soft_link_confidences: [high, medium]  # vínculo de confianza alta/media: severidad baja
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: DATE_MISMATCH
     description: >-
@@ -48,7 +48,7 @@ rules:
       check_payment_date: true            # el listado de Xunta trae "<fecha> y con <forma de pago>"
       payment_tolerance_days: 5
       soft_below_ocr_confidence: 70       # lectura con OCR por debajo de esto: severidad baja
-      soft_link_confidences: [high, medium]  # vínculo de confianza alta/media: severidad baja
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: DATE_OUT_OF_PERIOD
     description: >-
@@ -68,7 +68,7 @@ rules:
       document_grace_days: 0              # días de margen sobre el periodo para la fecha del documento
       payment_grace_days: 0               # idem para la fecha de pago
       soft_below_ocr_confidence: 70       # fecha leída con OCR poco fiable: severidad baja
-      soft_link_confidences: [high, medium]
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: DONOR_STAMP_MISSING
     description: >-
@@ -94,7 +94,7 @@ rules:
       percentage_tolerance_points: 1.0    # puntos porcentuales respecto al listado
       skip_cofinanced: true               # sin imputación al donante no hay sello que exigir
       soft_below_ocr_confidence: 70       # lectura con OCR por debajo de esto: severidad baja
-      soft_link_confidences: [high, medium]  # vínculo de confianza alta/media: severidad baja
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: NOT_AN_INVOICE
     description: >-
@@ -135,7 +135,7 @@ rules:
       cash_words: [efectivo, metalico, cash, caja]
       transfer_words: [transferencia, transfer, banco, bank, cheque]
       soft_below_ocr_confidence: 70       # lectura con OCR por debajo de esto: severidad baja
-      soft_link_confidences: [high, medium]  # vínculo de confianza alta/media: severidad baja
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: CASH_OVER_LIMIT
     description: >-

@@ -112,6 +112,46 @@ def test_stamp_needs_donor_and_hint_and_ignores_experiencia():
     assert fields.find_stamp("AECID imputación 50% experiencia").expedient is None
 
 
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Factura 77\nTotal 1,250,000\nForma de pago: transferencia bancaria a 30 días",
+        "INVOICE 12\nPayment terms: cheque, net 30",
+        "Factura 5\nCondiciones de pago: efectivo a la entrega",
+        "Factura 9\nDatos bancarios para transferencia: IBAN XX00 0000 0000",
+        "Bill 3\nPlease paye at the counter",  # «paye» ya no cuenta
+        "Factura 4\nCon esta fecha se emite la presente factura",  # «con esta fecha» tampoco
+        "Factura 8\nTotal a pagar 300.000",
+    ],
+)
+def test_payment_terms_are_not_proof_of_payment(text):
+    assert not fields.has_payment_proof(text, TipoSegmento.FACTURA)
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        "Factura 21\nPAGADO",
+        "Invoice 21\nPaid in full",
+        "Invoice 22\nReceived with thanks",
+        "Recibí conforme el importe de esta factura",
+        "Justificante de transferencia emitida",
+        "Comprobante de transferencia nº 4455",
+        "Nº de operación: 000123456",
+        "Referencia bancaria 99887766",
+        "Factura 30\nAbonado mediante cheque nº 12",
+        "Factura 31\nSe pagó en efectivo el día 3",
+    ],
+)
+def test_real_payment_marks_still_count(text):
+    assert fields.has_payment_proof(text, TipoSegmento.FACTURA)
+
+
+def test_receipts_and_transfers_are_always_payment_proof():
+    assert fields.has_payment_proof("", TipoSegmento.RECIBO)
+    assert fields.has_payment_proof("", TipoSegmento.TRANSFERENCIA)
+
+
 def test_legibility():
     assert fields.is_legible(80, None)
     assert not fields.is_legible(5, 90.0)

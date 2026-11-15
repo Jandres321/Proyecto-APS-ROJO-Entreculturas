@@ -7,6 +7,7 @@ Projects are addressed by their `key` (a slug). Decisions on findings use
 
 import datetime as dt
 import tempfile
+from collections.abc import Callable
 from pathlib import Path
 from typing import Annotated, Any
 
@@ -18,7 +19,7 @@ from app.api.deps import SessionDep
 from app.enums import Donor, LlmMode, SourceType
 from app.models import Project
 from app.pipeline.export import export_project_xlsx
-from app.pipeline.report import export_report_xlsx
+from app.pipeline.report import export_report_xlsx, report_filename
 from app.review_view import donor_rules, project_budget, project_review
 from app.services import jobs
 from app.services import projects as service
@@ -260,11 +261,13 @@ def budget(key: str, session: SessionDep) -> dict[str, Any]:
     return project_budget(session, _loaded(session, key))
 
 
-def _workbook(writer: Any, session: SessionDep, key: str, name: str) -> Response:
+def _workbook(
+    writer: Any, session: SessionDep, key: str, name: Callable[[Project], str]
+) -> Response:
     project = _loaded(session, key)
     with tempfile.TemporaryDirectory() as tmp:
         content = writer(session, project.id, Path(tmp) / "libro.xlsx").read_bytes()
-    filename = f"{project.code or project.key}_{name}.xlsx"
+    filename = name(project)
     return Response(
         content,
         media_type=XLSX,
@@ -276,11 +279,12 @@ def _workbook(writer: Any, session: SessionDep, key: str, name: str) -> Response
 def report(key: str, session: SessionDep) -> Response:
     """Analysis report: a summary, one row per expense (verdict, document, what was read inside
     it, findings) and the findings, budget and caps, with the decisions taken so far."""
-    stamp = dt.datetime.now().strftime("%Y%m%d_%H%M")
-    return _workbook(export_report_xlsx, session, key, f"informe_analisis_{stamp}")
+    return _workbook(export_report_xlsx, session, key, report_filename)
 
 
 @router.get("/{key}/export.xlsx")
 def export(key: str, session: SessionDep) -> Response:
     """Technical review workbook (findings, expenses, budget, caps)."""
-    return _workbook(export_project_xlsx, session, key, "revision")
+    return _workbook(
+        export_project_xlsx, session, key, lambda p: f"{p.code or p.key}_datos_tecnicos.xlsx"
+    )

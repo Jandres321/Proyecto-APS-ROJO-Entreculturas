@@ -49,14 +49,26 @@ def _check_amount(ctx: CheckContext, case: Case) -> list[FindingIn]:
     if not amounts or not segs:
         return []
 
-    def agrees(seg: Seg) -> bool:
-        wanted = list(amounts.values())
+    def wanted(seg: Seg) -> list[Decimal]:
+        out = list(amounts.values())
         shared = ctx.expenses_of_segment.get(seg.id, [])
         for label in amounts:  # a document shared by several expenses: compare the sum
             if len(shared) > 1 and all(label in e.amounts for e in shared):
-                wanted.append(sum(e.amounts[label] for e in shared))
-        figures = [seg.importe, *seg.importes]  # OCR may have picked the wrong "total"
-        return any(_within(f, w, pct, absolute) for f in figures for w in wanted)
+                out.append(sum(e.amounts[label] for e in shared))
+        return out
+
+    def agrees(seg: Seg) -> bool:
+        # Solo cuenta el total del documento. Una cifra cualquiera (precio unitario, subtotal,
+        # anticipo...) que coincida con el listado no basta para dar el importe por bueno.
+        return any(_within(seg.importe, w, pct, absolute) for w in wanted(seg))
+
+    def other_figure_agrees(seg: Seg) -> bool:
+        return any(
+            _within(f, w, pct, absolute)
+            for f in seg.importes
+            if f != seg.importe
+            for w in wanted(seg)
+        )
 
     if any(agrees(s) for s in segs):
         return []
@@ -77,15 +89,20 @@ def _check_amount(ctx: CheckContext, case: Case) -> list[FindingIn]:
         f"coincide con el del gasto {exp.ref} en el listado ({_money(listed, unit)}): "
         f"difiere en {_money(abs(diff), unit)}."
     )
-    # Most disagreements on trusted links are OCR misreadings (handwriting, stamps over the
-    # total): in Uganda all 37 "contradicted" links were right. Report them as a low-severity
-    # "check the reading" instead of an error.
+    other = other_figure_agrees(seg)
+    if other:
+        message = (
+            f"{message[:-1]}. Otra cifra del documento sí coincide con el listado, pero no es el "
+            f"total: comprueba qué importe se ha imputado."
+        )
+    # Solo se rebaja a "revisar la lectura" si la lectura es dudosa (OCR por debajo del umbral
+    # o vínculos listados en soft_link_confidences, vacío por defecto).
     why = unreliable_reading(exp, seg, params)
     soft = why is not None
     if soft:
         message = (
-            f"Revisar la lectura del importe: {message[0].lower()}{message[1:-1]}. Probablemente "
-            f"sea un error de lectura del OCR, porque {why}; compruébalo en el PDF."
+            f"Revisar la lectura del importe: {message[0].lower()}{message[1:-1]}. La lectura es "
+            f"dudosa porque {why}; compruébalo en el PDF."
         )
     return [
         _finding(
@@ -99,6 +116,7 @@ def _check_amount(ctx: CheckContext, case: Case) -> list[FindingIn]:
             diferencia=float(diff),
             moneda_listado=unit,
             lectura_dudosa=soft,
+            otra_cifra_coincide=other,
         )
     ]
 
@@ -159,6 +177,23 @@ def _check_date(ctx: CheckContext, case: Case) -> list[FindingIn]:
             )
         )
     return out
+
+
+MIN_EXPEDIENTE_CHARS = 4
+
+
+def _code_key(code: str | None) -> str:
+    """Código de expediente comparable: sin espacios, guiones ni barras, en minúsculas."""
+    return "".join(ch for ch in str(code or "") if ch not in " -/\t").lower()
+
+
+def _same_expediente(stamp: str | None, project: str | None) -> bool | None:
+    """True/False si se pueden comparar; None si falta alguno de los dos códigos."""
+    a, b = _code_key(stamp), _code_key(project)
+    # Too short to compare (a misread "1" would be contained in almost any code): no verdict.
+    if len(a) < MIN_EXPEDIENTE_CHARS or len(b) < MIN_EXPEDIENTE_CHARS:
+        return None
+    return a in b or b in a
 
 
 def _check_stamp(ctx: CheckContext, case: Case) -> list[FindingIn]:
@@ -222,8 +257,23 @@ def _check_stamp(ctx: CheckContext, case: Case) -> list[FindingIn]:
             issues.append(
                 f"indica un {seg.sello_porcentaje:g} % pero el listado imputa un {expected:.4g} %"
             )
+    out: list[FindingIn] = []
+    if _same_expediente(seg.sello_expediente, ctx.project_code) is False:
+        out.append(
+            _finding(
+                rule,
+                case,
+                f"El sello es de otro expediente ({seg.sello_expediente}); el proyecto es "
+                f"{ctx.project_code}. Gasto {exp.ref} ({seg.where}).",
+                seg=seg,
+                severity=Severity.HIGH,
+                subject="sello_expediente",
+                sello_expediente=seg.sello_expediente,
+                expediente_proyecto=ctx.project_code,
+            )
+        )
     if not issues:
-        return []
+        return out
     only_elsewhere = elsewhere and len(issues) == 1
     message = (
         f"El sello del donante del gasto {exp.ref} ({seg.where}) no es correcto: "
@@ -231,7 +281,7 @@ def _check_stamp(ctx: CheckContext, case: Case) -> list[FindingIn]:
         + "."
     )
     why = unreliable_reading(exp, seg, params)
-    return [
+    out.append(
         _finding(
             rule,
             case,
@@ -243,7 +293,8 @@ def _check_stamp(ctx: CheckContext, case: Case) -> list[FindingIn]:
             sello_porcentaje=seg.sello_porcentaje,
             porcentaje_listado=expected,
         )
-    ]
+    )
+    return out
 
 
 def _check_not_invoice(ctx: CheckContext, case: Case) -> list[FindingIn]:
@@ -447,17 +498,18 @@ def _check_illegible(ctx: CheckContext, case: Case) -> list[FindingIn]:
 
 def check_documents(ctx: CheckContext) -> list[FindingIn]:
     """Per expense with documents: amount, date, stamp, invoice validity, proof of payment, cash
-    limit and legibility. Cash limit also runs on expenses without documents (it is a property of
-    the listing)."""
+    limit and legibility. Cash limit and the execution period also run on expenses without
+    documents (the listing alone is enough for them)."""
     findings: list[FindingIn] = []
     for case in ctx.cases:
         findings += _check_cash_limit(ctx, case)
+        # El periodo se comprueba también sin documentos: la fecha del listado basta.
+        findings += _check_period(ctx, case)
         if not case.linked:
             continue
         for check in (
             _check_amount,
             _check_date,
-            _check_period,
             _check_stamp,
             _check_not_invoice,
             _check_payment,

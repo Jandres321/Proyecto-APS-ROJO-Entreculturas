@@ -47,14 +47,14 @@ def seg(i=1, doc="d1", tipo="factura", **kw) -> ck.Seg:
     return ck.Seg(id=i, doc_key=doc, tipo=tipo, **kw)
 
 
-def run(rules, expenses_segments, bundle_extra=(), period=None):
+def run(rules, expenses_segments, bundle_extra=(), period=None, project_code=None):
     """expenses_segments: [(expense, [linked segs])]; bundle = linked + bundle_extra."""
     cases, of_seg = [], {}
     for exp, linked in expenses_segments:
         cases.append(ck.Case(exp, list(linked), [*linked, *bundle_extra]))
         for s in linked:
             of_seg.setdefault(s.id, []).append(exp)
-    ctx = ck.CheckContext(rules, cases, of_seg, period)
+    ctx = ck.CheckContext(rules, cases, of_seg, period, project_code=project_code)
     return ck.check_documents(ctx) + ck.check_file_completeness(ctx) + ck.check_duplicates(ctx)
 
 
@@ -140,26 +140,27 @@ def test_amount_mismatch_reports_both_amounts_in_spanish():
     assert f.evidence["diferencia"] == -50000 and "referencia" in f.evidence
 
 
-def test_amount_mismatch_is_soft_on_trusted_link_or_weak_reading():
+def test_amount_mismatch_is_soft_only_on_weak_reading_not_on_trusted_link():
+    # Un vínculo de confianza alta ya no rebaja la severidad: el documento contradice el listado.
     trusted = run(xunta(), [(expense(link_confidence="high"), [seg(importe=450000)])])
     (f,) = [f for f in trusted if f.rule_code == "AMOUNT_MISMATCH"]
-    assert f.severity == Severity.LOW and f.evidence["lectura_dudosa"] is True
-    assert f.message.startswith("Revisar la lectura del importe") and "450.000" in f.message
+    assert f.severity == Severity.HIGH and f.evidence["lectura_dudosa"] is False
+    assert not f.message.startswith("Revisar la lectura") and "450.000" in f.message
     weak = run(xunta(), [(expense(), [seg(importe=450000, confianza_ocr=40)])])
     (g,) = [f for f in weak if f.rule_code == "AMOUNT_MISMATCH"]
     assert g.severity == Severity.LOW and "40 %" in g.message
+    assert g.message.startswith("Revisar la lectura del importe")
     low_link = run(xunta(), [(expense(link_confidence="low"), [seg(importe=450000)])])
     (h,) = [f for f in low_link if f.rule_code == "AMOUNT_MISMATCH"]
     assert h.severity == Severity.HIGH and h.evidence["lectura_dudosa"] is False
 
 
-def test_amount_ok_when_it_matches_any_listed_amount_or_a_figure_or_a_shared_sum():
+def test_amount_ok_when_the_total_matches_a_listed_amount_or_a_shared_sum():
     exp = expense()
     assert "AMOUNT_MISMATCH" not in codes(run(xunta(), [(exp, [seg(importe=500000)])]))
     assert "AMOUNT_MISMATCH" not in codes(run(xunta(), [(exp, [seg(importe=120, moneda="EUR")])]))
-    # OCR picked another figure as total, but the expense's amount is printed in the document
-    wrong_total = seg(importe=999999, importes=(Decimal(999999), Decimal(500000)))
-    assert "AMOUNT_MISMATCH" not in codes(run(xunta(), [(exp, [wrong_total])]))
+    # within the tolerance of the rule (1 %)
+    assert "AMOUNT_MISMATCH" not in codes(run(xunta(), [(exp, [seg(importe=503000)])]))
     # one invoice backing two expenses: it matches the SUM
     e1, e2 = expense(1, amount_local=Decimal(300000)), expense(2, amount_local=Decimal(200000))
     shared = seg(importe=500000)
@@ -186,6 +187,35 @@ def test_aecid_does_not_check_payment_date():
     assert "DATE_MISMATCH" not in codes(out)
 
 
+def test_amount_another_figure_matching_is_not_enough():
+    # Cambio 1: solo cuenta el total. Un precio unitario que coincide con el listado no basta.
+    exp = expense(amount_local=Decimal("80000"), amount_eur=None)
+    invoice = seg(
+        importe=960000, moneda="UGX", importes=(Decimal(80000), Decimal(12), Decimal(960000))
+    )
+    (f,) = _by_code(run(xunta(), [(exp, [invoice])]), "AMOUNT_MISMATCH")
+    assert f.severity == Severity.HIGH
+    assert "960.000" in f.message and "80.000" in f.message
+    assert "Otra cifra del documento sí coincide" in f.message
+    assert f.evidence["otra_cifra_coincide"] is True
+    # sin ninguna cifra parecida no se menciona
+    plain = seg(importe=960000, moneda="UGX", importes=(Decimal(960000),))
+    (g,) = _by_code(run(xunta(), [(exp, [plain])]), "AMOUNT_MISMATCH")
+    assert "Otra cifra" not in g.message and g.evidence["otra_cifra_coincide"] is False
+
+
+def test_money_without_currency_does_not_print_none():
+    # Cambio 6: un documento sin moneda leída no debe mostrar «None» en el mensaje.
+    from app.pipeline.checks.context import _money
+
+    assert "None" not in _money(Decimal("1500"), None)
+    assert _money(Decimal("1500"), None) == _money(Decimal("1500"))
+    assert _money(None, None) == "importe desconocido"
+    exp = expense(currency=None, amount_eur=None)
+    (f,) = _by_code(run(xunta(), [(exp, [seg(importe=450000, moneda=None)])]), "AMOUNT_MISMATCH")
+    assert "None" not in f.message
+
+
 # --- soft severity for doubtful readings (same criterion as AMOUNT_MISMATCH) ---
 
 
@@ -193,18 +223,19 @@ def _by_code(out, code):
     return [f for f in out if f.rule_code == code]
 
 
-def test_trusted_link_softens_stamp_payment_and_date_findings():
+def test_trusted_link_no_longer_softens_stamp_payment_and_date_findings():
+    # Cambio 4: soft_link_confidences: [] en los YAML; el vínculo fiable no rebaja nada.
     exp = expense(
         date=D(2024, 3, 20), link_confidence="high", extra={"payment": "02/04/2024 transferencia"}
     )
     linked = [seg(fecha=D(2024, 3, 1))]  # no stamp, date off by 19 days, no bank proof
     out = run(xunta(), [(exp, linked)])
+    rules = xunta()
     for code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING", "DATE_MISMATCH"):
         [finding] = _by_code(out, code)
-        assert finding.severity == Severity.LOW, code
-        assert finding.message.startswith("Revisar la lectura: "), code
-        assert finding.evidence["lectura_dudosa"] is True
-        assert "confianza alta/media" in finding.message
+        assert finding.severity == rules.rules[code].severity, code
+        assert not finding.message.startswith("Revisar la lectura"), code
+        assert finding.evidence["lectura_dudosa"] is False
 
 
 def test_poor_ocr_softens_even_without_a_trusted_link():
@@ -215,6 +246,10 @@ def test_poor_ocr_softens_even_without_a_trusted_link():
         [finding] = _by_code(out, code)
         assert finding.severity == Severity.LOW
         assert "poco fiable (40 %)" in finding.message
+        # Cambio 4: ya no se afirma que «probablemente» sea un error del OCR
+        assert "Probablemente" not in finding.message
+        assert "La lectura es dudosa porque" in finding.message
+        assert finding.message.endswith("compruébalo en el PDF.")
 
 
 def test_reliable_reading_keeps_the_rule_severity():
@@ -233,18 +268,29 @@ def test_softening_thresholds_come_from_the_yaml():
     exp = expense(link_confidence="high")
     rules = xunta()
     for code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING"):
-        rules.rules[code].params["soft_link_confidences"] = []  # switch the link criterion off
-        rules.rules[code].params["soft_below_ocr_confidence"] = 0
+        rules.rules[code].params["soft_below_ocr_confidence"] = 0  # switch the OCR criterion off
     out = run(rules, [(exp, [seg(confianza_ocr=10.0)])])
     assert all(
         f.severity != Severity.LOW
         for f in out
         if f.rule_code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING")
     )
-    for code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING", "DATE_MISMATCH"):
-        params = xunta().params(code)
-        assert params["soft_below_ocr_confidence"] == 70
-        assert params["soft_link_confidences"] == ["high", "medium"]
+    # the link criterion still exists, but only if a YAML turns it on explicitly
+    rules = xunta()
+    rules.rules["DONOR_STAMP_MISSING"].params["soft_link_confidences"] = ["high"]
+    [stamp] = _by_code(run(rules, [(exp, [seg(confianza_ocr=95.0)])]), "DONOR_STAMP_MISSING")
+    assert stamp.severity == Severity.LOW and "confianza alta/media" in stamp.message
+    for donor in ("xunta", "aecid"):
+        for code in (
+            "AMOUNT_MISMATCH",
+            "DONOR_STAMP_MISSING",
+            "PAYMENT_EVIDENCE_MISSING",
+            "DATE_MISMATCH",
+            "DATE_OUT_OF_PERIOD",
+        ):
+            params = load_rules(donor).params(code)
+            assert params["soft_below_ocr_confidence"] == 70
+            assert params["soft_link_confidences"] == []
 
 
 # --- DATE_OUT_OF_PERIOD ---
@@ -271,7 +317,8 @@ def test_document_date_outside_the_period_and_bank_proof_date():
     exp = expense(date=D(2023, 12, 20))
     linked = [seg(fecha=D(2023, 12, 20)), seg(2, tipo="transferencia", fecha=D(2025, 2, 1))]
     out = _period_findings(run(aecid(), [(exp, linked)], period=PERIOD))
-    assert {f.evidence["tipo_fecha"] for f in out} == {"del documento", "de pago"}
+    # la fecha del listado (2023) también está fuera: ahora se comprueba siempre
+    assert {f.evidence["tipo_fecha"] for f in out} == {"del listado", "del documento", "de pago"}
     assert {f.evidence["posicion"] for f in out} == {"antes", "despues"}
 
 
@@ -294,10 +341,34 @@ def test_without_a_period_the_rule_does_not_apply():
 
 
 def test_ocr_dates_outside_the_period_are_soft_when_the_reading_is_doubtful():
-    exp = expense(date=D(2024, 5, 1), link_confidence="high")
-    out = _period_findings(run(xunta(), [(exp, [seg(fecha=D(2023, 5, 1))])], period=PERIOD))
+    exp = expense(date=D(2024, 5, 1), link_confidence="low")
+    poor = seg(fecha=D(2023, 5, 1), confianza_ocr=40.0)
+    out = _period_findings(run(xunta(), [(exp, [poor])], period=PERIOD))
     [finding] = out
     assert finding.severity == Severity.LOW and finding.message.startswith("Revisar la lectura")
+    # con vínculo fiable pero buena lectura ya no se rebaja
+    trusted = expense(date=D(2024, 5, 1), link_confidence="high")
+    clean = seg(fecha=D(2023, 5, 1), confianza_ocr=95.0)
+    [hard] = _period_findings(run(xunta(), [(trusted, [clean])], period=PERIOD))
+    assert hard.severity == xunta().rules["DATE_OUT_OF_PERIOD"].severity
+
+
+def test_listing_date_outside_the_period_is_high_even_without_documents():
+    # Cambio 5: la fecha del gasto en el listado se compara con el periodo aunque no haya
+    # ningún segmento enlazado.
+    early = expense(date=D(2023, 11, 30))
+    [finding] = _period_findings(run(xunta(), [(early, [])], period=PERIOD))
+    assert finding.severity == Severity.HIGH
+    assert finding.evidence["tipo_fecha"] == "del listado"
+    assert finding.evidence["posicion"] == "antes" and finding.document_id is None
+    assert "30/11/2023" in finding.message and "listado" in finding.message
+    assert "anterior al inicio" in finding.message and "01/01/2024 - 31/12/2024" in finding.message
+    late = expense(2, date=D(2025, 1, 15))
+    [after] = _period_findings(run(xunta(), [(late, [seg(fecha=D(2024, 12, 1))])], period=PERIOD))
+    assert after.severity == Severity.HIGH and after.evidence["posicion"] == "despues"
+    inside = expense(3, date=D(2024, 6, 1))
+    assert not _period_findings(run(xunta(), [(inside, [])], period=PERIOD))
+    assert not _period_findings(run(xunta(), [(early, [])], period=None))
 
 
 def test_project_period_comes_from_the_project_dates():
@@ -331,6 +402,26 @@ def test_stamp_missing_incomplete_wrong_percentage_and_ok():
     assert "100 %" in msg and "50 %" in msg
     good = seg(sello_donante=True, sello_expediente="PR811A", sello_porcentaje=50.0)
     assert "DONOR_STAMP_MISSING" not in codes(run(xunta(), [(exp, [good])]))
+
+
+def test_stamp_from_another_expediente_is_high():
+    # Cambio 2: el expediente del sello se compara con el código del proyecto.
+    exp = expense(extra={"pct_imputed": 1.0})
+    alien = seg(sello_donante=True, sello_expediente="2019/ABCD/0001", sello_porcentaje=100.0)
+    out = run(xunta(), [(exp, [alien])], project_code="ZZ-99-001")
+    [finding] = _by_code(out, "DONOR_STAMP_MISSING")
+    assert finding.severity == Severity.HIGH
+    assert finding.message.startswith("El sello es de otro expediente (2019/ABCD/0001)")
+    assert "el proyecto es ZZ-99-001" in finding.message
+    assert finding.evidence["expediente_proyecto"] == "ZZ-99-001"
+    # mismo código con otro formato (espacios, guiones, barras, mayúsculas) o contenido en el otro
+    for written in ("zz 99/001", "ZZ99001", "Exp. ZZ-99-001", "99-001"):
+        same = seg(sello_donante=True, sello_expediente=written, sello_porcentaje=100.0)
+        assert not _by_code(
+            run(xunta(), [(exp, [same])], project_code="ZZ-99-001"), "DONOR_STAMP_MISSING"
+        ), written
+    # sin código de proyecto no se compara
+    assert not _by_code(run(xunta(), [(exp, [alien])]), "DONOR_STAMP_MISSING")
 
 
 def test_stamp_in_another_document_of_the_same_pdf_is_a_low_finding():

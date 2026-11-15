@@ -29,7 +29,7 @@ rules:
       tolerance_pct: 0.01
       tolerance_abs: 1
       soft_below_ocr_confidence: 70       # lectura con OCR por debajo de esto: severidad baja
-      soft_link_confidences: [high, medium]  # vínculo de confianza alta/media: severidad baja
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: DATE_MISMATCH
     description: >-
@@ -47,7 +47,7 @@ rules:
       check_payment_date: false           # el listado AECID no recoge la fecha de pago
       payment_tolerance_days: 5
       soft_below_ocr_confidence: 70       # lectura con OCR por debajo de esto: severidad baja
-      soft_link_confidences: [high, medium]  # vínculo de confianza alta/media: severidad baja
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: DATE_OUT_OF_PERIOD
     description: >-
@@ -65,7 +65,7 @@ rules:
       document_grace_days: 0
       payment_grace_days: 0
       soft_below_ocr_confidence: 70
-      soft_link_confidences: [high, medium]
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: DONOR_STAMP_MISSING
     description: >-
@@ -84,7 +84,7 @@ rules:
       percentage_tolerance_points: 1.0
       skip_cofinanced: true
       soft_below_ocr_confidence: 70       # lectura con OCR por debajo de esto: severidad baja
-      soft_link_confidences: [high, medium]  # vínculo de confianza alta/media: severidad baja
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: NOT_AN_INVOICE
     description: >-
@@ -125,7 +125,7 @@ rules:
       cash_words: [efectivo, metalico, cash, contado]
       transfer_words: [transferencia, banco, cheque]
       soft_below_ocr_confidence: 70       # lectura con OCR por debajo de esto: severidad baja
-      soft_link_confidences: [high, medium]  # vínculo de confianza alta/media: severidad baja
+      soft_link_confidences: []           # vínculo fiable ya no rebaja la severidad
 
   - code: CASH_OVER_LIMIT
     description: >-
