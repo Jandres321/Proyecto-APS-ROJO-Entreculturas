@@ -163,9 +163,10 @@ def delete_project(session: Session, project: Project, *, delete_files: bool = F
 def find_report(folder: Path, hint: str = "") -> str:
     """The report spreadsheet inside a project folder, as a path relative to it.
 
-    With a `hint` (file name, with or without extension) that file must exist. Without it: the
+    With a `hint` (file name, with or without extension) that file must exist. If the same name
+    appears in the project root and in a subfolder, prefer the root copy. Without a hint: the
     only spreadsheet whose name contains "informe", else the only spreadsheet at all. Anything
-    ambiguous is an error that names the candidates, so the user can say which one it is.
+    else ambiguous is an error that names the candidates, so the user can say which one it is.
     """
     sheets = sorted(
         p
@@ -182,6 +183,11 @@ def find_report(folder: Path, hint: str = "") -> str:
         ]
         if len(matches) == 1:
             return matches[0]
+        if matches:
+            shallowest = min(match.count("/") for match in matches)
+            root_matches = [match for match in matches if match.count("/") == shallowest]
+            if len(root_matches) == 1:
+                return root_matches[0]
         raise ProjectError(
             f"No encuentro el informe «{hint}» en la carpeta. Hojas de cálculo que hay: "
             + (", ".join(relative) or "ninguna")

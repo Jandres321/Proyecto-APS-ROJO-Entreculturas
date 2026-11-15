@@ -173,6 +173,8 @@ def test_the_report_is_found_or_the_candidates_are_named(tmp_path):
     both = folder("Informe económico final.xls", "sub/Presupuesto.xlsx", "~$Informe.xlsx")
     assert find_report(both) == "Informe económico final.xls"  # the one named "informe"
     assert find_report(both, "presupuesto") == "sub/Presupuesto.xlsx"  # the user's hint
+    duplicate = folder("Informe económico final.xls", "justificantes/Informe económico final.xls")
+    assert find_report(duplicate, "Informe económico final.xls") == "Informe económico final.xls"
     with pytest.raises(ProjectError, match="No encuentro el informe «otro»"):
         find_report(both, "otro")
     with pytest.raises(ProjectError, match="varias hojas.*A.xlsx, B.xlsx"):
