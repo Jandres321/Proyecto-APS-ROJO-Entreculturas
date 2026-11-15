@@ -46,7 +46,6 @@ class AnthropicClient(LLMClient):
 
         # Without an explicit key the SDK takes it from the environment (ANTHROPIC_API_KEY).
         self._client = AsyncAnthropic(api_key=api_key or None)
-        self.usage: list[dict[str, int]] = []
 
     async def _call(self, content: list[dict[str, Any]], schema: JsonSchema) -> dict[str, Any]:
         async with self.semaphore:

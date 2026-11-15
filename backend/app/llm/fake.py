@@ -23,6 +23,8 @@ class FakeLLMClient(LLMClient):
         self, images: Sequence[bytes], schema: JsonSchema, prompt: str
     ) -> dict[str, Any]:
         self.calls.append({"method": "extract", "n_images": len(images), "prompt": prompt})
+        # Deterministic fake token counts so cost reporting can be tested offline.
+        self.usage.append({"input": 1000 * max(len(images), 1), "output": 100})
         return self._next()
 
     async def complete_json(self, prompt: str, schema: JsonSchema) -> dict[str, Any]:

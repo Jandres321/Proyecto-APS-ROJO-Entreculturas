@@ -1,7 +1,8 @@
 """CLI: read PDFs, segment them, store the segments and print them per PDF.
 
     python -m app.lectura <carpeta|pdf> [--max N] [--convencion dot_thousands|comma_thousands|auto]
-        [--moneda PYG] [--llm] [--no-guardar] [--workers N]
+        [--moneda PYG] [--llm | --llm-modo off|dudosas|todas] [--llm-max-paginas N]
+        [--llm-min-confianza X] [--no-guardar] [--workers N]
 
 Examples (from backend/):
     python -m app.lectura "$DATA_DIR/DocJustificativa/22-PY-136 - AECID" --convencion dot_thousands
@@ -17,6 +18,7 @@ from pathlib import Path
 from app.config import get_settings
 from app.lectura import fields
 from app.lectura.pipeline import PdfResult, list_pdfs, process_pdfs
+from app.lectura.vision import LLM_MODES, LlmReadOptions
 
 
 def evenly_spaced[T](items: list[T], n: int) -> list[T]:
@@ -85,7 +87,21 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument(
         "--llm",
         action="store_true",
-        help="añade el backend LLM con visión (exige ALLOW_EXTERNAL_LLM=true)",
+        help="atajo de --llm-modo todas (exige ALLOW_EXTERNAL_LLM=true)",
+    )
+    ap.add_argument(
+        "--llm-modo",
+        choices=LLM_MODES,
+        default=None,
+        help="páginas que van al LLM con visión: off, dudosas (OCR flojo o sin importe/fecha) o "
+        "todas. Exige ALLOW_EXTERNAL_LLM=true salvo con el proveedor fake",
+    )
+    ap.add_argument("--llm-max-paginas", type=int, default=50, help="tope de páginas enviadas")
+    ap.add_argument(
+        "--llm-min-confianza",
+        type=float,
+        default=60.0,
+        help="confianza OCR (0-100) por debajo de la cual una página es dudosa",
     )
     ap.add_argument("--no-guardar", action="store_true", help="no escribir en la tabla segmento")
     ap.add_argument("--workers", type=int, default=None)
@@ -110,8 +126,16 @@ def main(argv: list[str] | None = None) -> int:
             print(f"\r  páginas leídas: {done}/{total}", end="", file=sys.stderr, flush=True)
 
     print(f"Leyendo {len(pdfs)} PDFs…", file=sys.stderr)
+    mode = args.llm_modo or ("todas" if args.llm else "off")
+    options = LlmReadOptions(mode, args.llm_max_paginas, args.llm_min_confianza)
     results = process_pdfs(
-        pdfs, settings, args.convencion, args.moneda, args.llm, args.workers, progress
+        pdfs,
+        settings,
+        args.convencion,
+        args.moneda,
+        workers=args.workers,
+        progress=progress,
+        llm=options,
     )
     print(f"\r  hecho en {time.time() - t0:.0f} s{' ' * 20}", file=sys.stderr)
 

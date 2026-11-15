@@ -20,6 +20,8 @@ class LLMClient(ABC):
         self.api_key = api_key
         # Subclasses should wrap provider calls in `async with self.semaphore:`.
         self.semaphore = asyncio.Semaphore(max_concurrency)
+        # One {"input": tokens, "output": tokens} entry per call, to estimate the cost of a run.
+        self.usage: list[dict[str, int]] = []
 
     @abstractmethod
     async def extract(

@@ -491,7 +491,7 @@ python -m app.lectura "$DATA_DIR/DocJustificativa/24-UG-226 Adjumani - Xunta 202
 | `--convencion` | Importes: `dot_thousands` (Paraguay: `1.250.000`), `comma_thousands` (Uganda: `1,250,000.50`) o `auto` |
 | `--moneda` | Moneda por defecto si el documento no la indica (una mención suelta de «euros» no la pisa) |
 | `--max N` / `--excluir REGEX` | Muestra de N PDFs repartidos por la lista / ignora nombres (normativa) |
-| `--llm` | Añade el backend LLM con visión. **Solo con `ALLOW_EXTERNAL_LLM=true`** |
+| `--llm` / `--llm-modo` | Backend LLM con visión (`--llm` = todas las páginas; `--llm-modo dudosas` solo las dudosas). **Solo con `ALLOW_EXTERNAL_LLM=true`** |
 | `--no-guardar` | No escribe en `segmento` |
 
 - **Páginas:** texto nativo si lo hay; si no, OCR con Tesseract (`spa+eng+fra`). Si la lectura es
@@ -505,6 +505,18 @@ python -m app.lectura "$DATA_DIR/DocJustificativa/24-UG-226 Adjumani - Xunta 202
   nº de orden escrito/sellado, sello del donante (sí/no, expediente, %), prueba de pago, legible y
   página (`pagina_inicio`/`pagina_fin`). Todo con reglas en código; el LLM, si se activa, solo
   completa y sus valores pisan a las reglas.
+- **Lectura selectiva con el LLM (`LlmReadOptions`):** `modo` `off` (por defecto), `dudosas` o
+  `todas`, `max_pages` y `min_ocr_confidence`. En `dudosas` solo se envían las páginas con confianza
+  OCR por debajo del umbral o cuyo segmento no tiene importe o fecha (las listas de asistencia y los
+  segmentos «otro» no los necesitan); nunca más de `max_pages` por ejecución, las más dudosas
+  primero. Las páginas ya leídas por el LLM salen de la caché sin coste y no cuentan para el tope.
+  `process_pdfs(..., llm=...)` devuelve la lista de PDFs con `.llm` (`LlmReadSummary`: páginas
+  enviadas, tokens y coste estimado con `LLM_PRICE_INPUT_PER_MTOK`/`LLM_PRICE_OUTPUT_PER_MTOK`).
+  `read_project_documents(..., llm=..., on_llm_summary=...)` hace lo mismo para un proyecto.
+  CLI: `--llm-modo off|dudosas|todas --llm-max-paginas N --llm-min-confianza X` (`--llm` = `todas`).
+- **Qué campo gana:** el valor del LLM sustituye al del OCR solo si el OCR no lo tenía o la
+  confianza del segmento es baja (< umbral) o es ilegible; si no, se queda el del OCR.
+  `segmento.extra["campo_fuente"]` guarda el origen de cada campo (`ocr` o `llm`).
 - **Backend LLM con visión:** desactivado por defecto porque envía páginas a un servicio externo.
   Con proveedor distinto de `fake` exige `ALLOW_EXTERNAL_LLM=true`. Proveedor implementado: `anthropic`
   (`app/llm/anthropic_client.py`, salida estructurada; modelo en `LLM_MODEL`, por defecto `claude-haiku-5-5`;

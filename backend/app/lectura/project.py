@@ -9,6 +9,7 @@ from sqlalchemy.orm import Session
 from app.config import Settings, get_settings
 from app.lectura.pipeline import process_pdfs
 from app.lectura.store import save_segments
+from app.lectura.vision import LlmReadOptions, LlmReadSummary
 from app.models import Document, Project
 from app.pipeline.ingest import ZIP_MEMBER_SEPARATOR
 from app.pipeline.match_config import get_match_config
@@ -22,12 +23,18 @@ def read_project_documents(
     use_llm: bool = False,
     workers: int | None = None,
     progress: Callable[[int, int], None] | None = None,
+    llm: LlmReadOptions | None = None,
+    on_llm_summary: Callable[[LlmReadSummary], None] | None = None,
 ) -> int:
     """OCR / read every PDF registered for the project and replace its segments.
 
     Paths in `document` are relative to DATA_DIR. PDFs inside .zip files are skipped (they are
     matched through the archive's name). The amount convention and default currency come from the
     project's match config. Returns the number of segments stored.
+
+    `llm` selects which pages go to the vision LLM (None / mode "off": none, unless the legacy
+    `use_llm` is set); `on_llm_summary` receives the run's summary (pages sent, tokens, estimated
+    cost) so callers such as the API can report it.
     """
     settings = settings or get_settings()
     project = session.get(Project, project_id)
@@ -51,7 +58,10 @@ def read_project_documents(
         use_llm=use_llm,
         workers=workers,
         progress=progress,
+        llm=llm,
     )
+    if on_llm_summary is not None:
+        on_llm_summary(results.llm)
     total = sum(save_segments(session, r, Path(base)) for r in results)
     session.commit()
     return total

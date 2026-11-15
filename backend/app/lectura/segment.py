@@ -99,9 +99,17 @@ def _first(values: list[Any]) -> Any:
 
 
 def fill_segment(
-    segment: Segment, convention: str = "auto", default_currency: str | None = None
+    segment: Segment,
+    convention: str = "auto",
+    default_currency: str | None = None,
+    min_ocr_confidence: float | None = None,
 ) -> Segment:
-    """Extract the fields of a segment from the text of its pages (+ LLM fields if any)."""
+    """Extract the fields of a segment from the text of its pages (+ LLM fields if any).
+
+    LLM values replace the OCR ones only where the OCR had none or the segment's OCR confidence is
+    below `min_ocr_confidence`. With `min_ocr_confidence=None` (direct callers) the LLM always wins.
+    `extra["campo_fuente"]` records, per field, which source gave the value ("ocr" or "llm").
+    """
     texts = [p.text for p in segment.pages]
     joined = "\n".join(texts)
     tipo = segment.tipo
@@ -140,32 +148,70 @@ def fill_segment(
     if rotated:
         segment.extra["paginas_giradas"] = rotated
 
-    _merge_llm(segment)
+    _record_sources(segment)
+    _merge_llm(segment, min_ocr_confidence)
     return segment
 
 
 _LLM_SCALARS = ("emisor", "nif", "numero_factura", "moneda", "numero_orden", "sello_expediente")
+# Fields whose absence is a falsy value rather than None.
+_SOURCE_FIELDS = (
+    *_LLM_SCALARS,
+    "fecha",
+    "importe",
+    "sello_donante",
+    "sello_porcentaje",
+    "prueba_pago",
+)
 
 
-def _merge_llm(segment: Segment) -> None:
-    """Vision-LLM values (when the backend ran) override the heuristics where present."""
+def _record_sources(segment: Segment) -> None:
+    """Initial provenance: every field the heuristics found comes from the OCR / native text."""
+    segment.extra["campo_fuente"] = {
+        name: "ocr" for name in _SOURCE_FIELDS if getattr(segment, name) not in (None, "", False)
+    }
+
+
+def _merge_llm(segment: Segment, min_ocr_confidence: float | None = None) -> None:
+    """Vision-LLM values replace the heuristics where those had nothing or the OCR is unreliable."""
     extracted = [p.llm_fields for p in segment.pages if p.llm_fields]
     if not extracted:
         return
+    sources: dict[str, str] = segment.extra.setdefault("campo_fuente", {})
+    low_confidence = min_ocr_confidence is None or not segment.legible
+    if min_ocr_confidence is not None and segment.confianza_ocr is not None:
+        low_confidence = low_confidence or segment.confianza_ocr < min_ocr_confidence
+
+    def may_replace(name: str, current: Any) -> bool:
+        return low_confidence or current in (None, "", False)
+
+    def take(name: str, value: Any) -> None:
+        setattr(segment, name, value)
+        sources[name] = "llm"
+
     for name in _LLM_SCALARS:
         value = _first([f.get(name) for f in extracted])
-        if value:
-            setattr(segment, name, str(value))
-    if (raw := _first([f.get("fecha") for f in extracted])) is not None:
+        if value and may_replace(name, getattr(segment, name)):
+            take(name, str(value))
+    if (raw := _first([f.get("fecha") for f in extracted])) is not None and may_replace(
+        "fecha", segment.fecha
+    ):
         with contextlib.suppress(ValueError):
-            segment.fecha = dt.date.fromisoformat(str(raw))
-    if (raw := _first([f.get("importe") for f in extracted])) is not None:
+            take("fecha", dt.date.fromisoformat(str(raw)))
+    if (raw := _first([f.get("importe") for f in extracted])) is not None and may_replace(
+        "importe", segment.importe
+    ):
         with contextlib.suppress(ArithmeticError):
-            segment.importe = Decimal(str(raw))
-    for name in ("sello_donante", "prueba_pago", "legible"):
+            take("importe", Decimal(str(raw)))
+    for name in ("sello_donante", "prueba_pago"):
         values = [f.get(name) for f in extracted if f.get(name) is not None]
-        if values:
-            setattr(segment, name, any(values) if name != "legible" else all(values))
-    if (pct := _first([f.get("sello_porcentaje") for f in extracted])) is not None:
-        segment.sello_porcentaje = float(pct)
+        if values and may_replace(name, getattr(segment, name)):
+            take(name, any(values))
+    legible = [f.get("legible") for f in extracted if f.get("legible") is not None]
+    if legible and (low_confidence or not segment.legible):
+        take("legible", all(legible))
+    if (pct := _first([f.get("sello_porcentaje") for f in extracted])) is not None and may_replace(
+        "sello_porcentaje", segment.sello_porcentaje
+    ):
+        take("sello_porcentaje", float(pct))
     segment.extra["llm"] = True

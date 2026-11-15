@@ -32,6 +32,10 @@ class Settings(BaseSettings):
     # Sending documents to an external LLM is OFF unless the team explicitly allows it
     # (Entreculturas has not yet confirmed which provider is permitted).
     allow_external_llm: bool = False
+    # Price per million tokens used to ESTIMATE the cost of a reading run (defaults: Claude
+    # Haiku 5.5, prompts up to 100K tokens). Override them when LLM_MODEL is another model.
+    llm_price_input_per_mtok: float = 0.10
+    llm_price_output_per_mtok: float = 0.50
 
     cache_dir: Path = Path("./cache")
 
