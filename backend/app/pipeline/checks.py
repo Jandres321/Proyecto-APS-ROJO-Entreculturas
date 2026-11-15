@@ -241,6 +241,14 @@ def unreliable_reading(exp: ExpenseFacts, seg: Seg, params: dict[str, Any]) -> s
     return None
 
 
+def soften(message: str, why: str) -> str:
+    """Turn a finding message into a "check the reading" one (used with `unreliable_reading`)."""
+    return (
+        f"Revisar la lectura: {message[0].lower()}{message[1:]} Probablemente sea un error de "
+        f"lectura del OCR, porque {why}; compruébalo en el PDF."
+    )
+
+
 def payment_method(expense: ExpenseFacts, params: dict[str, Any]) -> str | None:
     """'efectivo' / 'transferencia' / None, from the listing's free-text payment column."""
     text = normalize(str((expense.extra or {}).get("payment") or ""))
@@ -349,13 +357,19 @@ def _check_date(ctx: CheckContext, case: Case) -> list[FindingIn]:
     if exp.date and dated and all(abs((s.fecha - exp.date).days) > tolerance for s in dated):
         seg = min(dated, key=lambda s: abs((s.fecha - exp.date).days))
         days = abs((seg.fecha - exp.date).days)
+        message = (
+            f"La fecha del documento ({_date(seg.fecha)}; {seg.where}) no coincide con la del "
+            f"gasto {exp.ref} en el listado ({_date(exp.date)}): {days} días de diferencia."
+        )
+        why = unreliable_reading(exp, seg, params)
         out.append(
             _finding(
                 rule,
                 case,
-                f"La fecha del documento ({_date(seg.fecha)}; {seg.where}) no coincide con la del "
-                f"gasto {exp.ref} en el listado ({_date(exp.date)}): {days} días de diferencia.",
+                soften(message, why) if why else message,
                 seg=seg,
+                severity=Severity.LOW if why else None,
+                lectura_dudosa=bool(why),
                 fecha_documento=seg.fecha.isoformat(),
                 fecha_listado=exp.date.isoformat(),
                 dias=days,
@@ -367,14 +381,20 @@ def _check_date(ctx: CheckContext, case: Case) -> list[FindingIn]:
     if paid and proofs and all(abs((s.fecha - paid).days) > pay_tol for s in proofs):
         seg = min(proofs, key=lambda s: abs((s.fecha - paid).days))
         days = abs((seg.fecha - paid).days)
+        message = (
+            f"El listado dice que el gasto {exp.ref} se pagó el {_date(paid)}, pero el "
+            f"justificante bancario ({seg.where}) es del {_date(seg.fecha)}: {days} días de "
+            "diferencia."
+        )
+        why = unreliable_reading(exp, seg, params)
         out.append(
             _finding(
                 rule,
                 case,
-                f"El listado dice que el gasto {exp.ref} se pagó el {_date(paid)}, pero el "
-                f"justificante bancario ({seg.where}) es del {_date(seg.fecha)}: {days} días de "
-                "diferencia.",
+                soften(message, why) if why else message,
                 seg=seg,
+                severity=Severity.LOW if why else None,
+                lectura_dudosa=bool(why),
                 fecha_pago_listado=paid.isoformat(),
                 fecha_justificante_pago=seg.fecha.isoformat(),
                 dias=days,
@@ -427,10 +447,7 @@ def _check_period(ctx: CheckContext, case: Case) -> list[FindingIn]:
             f"del periodo del proyecto ({_period_text(period)})."
         )
         if why:
-            message = (
-                f"Revisar la lectura: {message[0].lower()}{message[1:-1]}. Probablemente sea un "
-                f"error de lectura de la fecha, porque {why}; compruébalo en el PDF."
-            )
+            message = soften(message, why)
         out.append(
             _finding(
                 rule,
@@ -491,14 +508,20 @@ def _check_stamp(ctx: CheckContext, case: Case) -> list[FindingIn]:
         elsewhere = bool(stamped)
     if not stamped:
         names = ", ".join(s.where for s in docs[:3])
+        message = (
+            f"No se ha detectado el sello del donante en el justificante del gasto {exp.ref} "
+            f"({names}). Si el sello está pero no se lee bien, descarta la incidencia."
+        )
+        why = unreliable_reading(exp, docs[0], params)
         return [
             _finding(
                 rule,
                 case,
-                f"No se ha detectado el sello del donante en el justificante del gasto {exp.ref} "
-                f"({names}). Si el sello está pero no se lee bien, descarta la incidencia.",
+                soften(message, why) if why else message,
                 seg=docs[0],
+                severity=Severity.LOW if why else None,
                 segmentos=[s.id for s in docs],
+                lectura_dudosa=bool(why),
             )
         ]
     seg = max(stamped, key=lambda s: (bool(s.sello_expediente), s.sello_porcentaje is not None))
@@ -527,15 +550,20 @@ def _check_stamp(ctx: CheckContext, case: Case) -> list[FindingIn]:
     if not issues:
         return []
     only_elsewhere = elsewhere and len(issues) == 1
+    message = (
+        f"El sello del donante del gasto {exp.ref} ({seg.where}) no es correcto: "
+        + "; ".join(issues)
+        + "."
+    )
+    why = unreliable_reading(exp, seg, params)
     return [
         _finding(
             rule,
             case,
-            f"El sello del donante del gasto {exp.ref} ({seg.where}) no es correcto: "
-            + "; ".join(issues)
-            + ".",
+            soften(message, why) if why else message,
             seg=seg,
-            severity=Severity.LOW if only_elsewhere else None,
+            severity=Severity.LOW if only_elsewhere or why else None,
+            lectura_dudosa=bool(why),
             sello_expediente=seg.sello_expediente,
             sello_porcentaje=seg.sello_porcentaje,
             porcentaje_listado=expected,
@@ -643,41 +671,42 @@ def _check_payment(ctx: CheckContext, case: Case) -> list[FindingIn]:
     paid_stamps = [s for s in case.bundle if s.tipo in INVOICE_LIKE and s.prueba_pago]
     ref_seg = (case.linked or case.bundle)[0]
 
+    message: str | None = None
+    evidence: dict[str, Any] = {}
     if method == "efectivo":
         if params.get("cash_requires_paid_stamp", True) and not paid_stamps:
-            return [
-                _finding(
-                    rule,
-                    case,
-                    f"El gasto {exp.ref} se pagó en efectivo, pero la factura no lleva sello de "
-                    "«pagado» ni firma del proveedor que lo acredite.",
-                    seg=ref_seg,
-                    forma_pago="efectivo",
-                )
-            ]
-        return []
-    if method == "transferencia":
+            message = (
+                f"El gasto {exp.ref} se pagó en efectivo, pero la factura no lleva sello de "
+                "«pagado» ni firma del proveedor que lo acredite."
+            )
+            evidence = {"forma_pago": "efectivo"}
+    elif method == "transferencia":
         if not bank_proofs:
-            return [
-                _finding(
-                    rule,
-                    case,
-                    f"El listado dice que el gasto {exp.ref} se pagó por transferencia, pero no "
-                    "hay justificante bancario en el expediente.",
-                    seg=ref_seg,
-                    forma_pago="transferencia",
-                )
-            ]
+            message = (
+                f"El listado dice que el gasto {exp.ref} se pagó por transferencia, pero no "
+                "hay justificante bancario en el expediente."
+            )
+            evidence = {"forma_pago": "transferencia"}
+    elif not (bank_proofs or (params.get("accept_paid_stamp", True) and paid_stamps)):
+        message = (
+            f"No se ha encontrado la prueba de pago del gasto {exp.ref}: ni justificante "
+            "bancario ni sello de «pagado»."
+        )
+    if message is None:
         return []
-    if bank_proofs or (params.get("accept_paid_stamp", True) and paid_stamps):
-        return []
+    # The proof may sit on a page the OCR could not read: any doubtful document of the file counts.
+    why = next(
+        (w for seg in (ref_seg, *case.bundle) if (w := unreliable_reading(exp, seg, params))), None
+    )
     return [
         _finding(
             rule,
             case,
-            f"No se ha encontrado la prueba de pago del gasto {exp.ref}: ni justificante "
-            "bancario ni sello de «pagado».",
+            soften(message, why) if why else message,
             seg=ref_seg,
+            severity=Severity.LOW if why else None,
+            lectura_dudosa=bool(why),
+            **evidence,
         )
     ]
 

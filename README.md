@@ -261,6 +261,12 @@ es un error; una regla se apaga con `active: false`). `sync_rules` las vuelca a 
 | `DUPLICATE_INVOICE` (alta) | misma factura en dos PDF; un documento imputado a varios gastos por más de su importe; línea repetida en el listado (mismo nº, emisor, concepto e importe) | + listado | no (el listado no trae el nº de factura) |
 | `DOC_INCOMPLETE` (media) | nómina → contrato + pago + cotización; refrigerios → lista de asistencia | sí | sí |
 
+- **Menos falsos avisos (lectura dudosa):** `AMOUNT_MISMATCH`, `DATE_MISMATCH`, `DONOR_STAMP_MISSING`,
+  `PAYMENT_EVIDENCE_MISSING` y `DATE_OUT_OF_PERIOD` bajan a severidad **baja** y el mensaje empieza por «Revisar la
+  lectura: …» cuando el documento está vinculado con confianza alta/media o la confianza OCR es baja. Se controla en
+  el YAML de cada regla con `soft_link_confidences` (lista; vacía = criterio apagado) y `soft_below_ocr_confidence`
+  (0 = apagado); la evidencia lleva `lectura_dudosa`. Para la prueba de pago basta con que *algún* documento del
+  expediente se lea mal (la prueba puede estar en esa página).
 - Las comprobaciones sobre documentos solo se ejecutan en gastos **con segmentos vinculados**; los gastos sin
   documento ya los señala `DOC_MISSING`. `CASH_OVER_LIMIT` es una propiedad del listado y se evalúa siempre.
 - El **expediente** de un gasto son los segmentos enlazados (importe, fecha, sello...) más todos los del mismo PDF

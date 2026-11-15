@@ -186,6 +186,67 @@ def test_aecid_does_not_check_payment_date():
     assert "DATE_MISMATCH" not in codes(out)
 
 
+# --- soft severity for doubtful readings (same criterion as AMOUNT_MISMATCH) ---
+
+
+def _by_code(out, code):
+    return [f for f in out if f.rule_code == code]
+
+
+def test_trusted_link_softens_stamp_payment_and_date_findings():
+    exp = expense(
+        date=D(2024, 3, 20), link_confidence="high", extra={"payment": "02/04/2024 transferencia"}
+    )
+    linked = [seg(fecha=D(2024, 3, 1))]  # no stamp, date off by 19 days, no bank proof
+    out = run(xunta(), [(exp, linked)])
+    for code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING", "DATE_MISMATCH"):
+        [finding] = _by_code(out, code)
+        assert finding.severity == Severity.LOW, code
+        assert finding.message.startswith("Revisar la lectura: "), code
+        assert finding.evidence["lectura_dudosa"] is True
+        assert "confianza alta/media" in finding.message
+
+
+def test_poor_ocr_softens_even_without_a_trusted_link():
+    exp = expense(date=D(2024, 3, 20), link_confidence="low")
+    poor = seg(fecha=D(2024, 3, 1), confianza_ocr=40.0)
+    out = run(xunta(), [(exp, [poor])])
+    for code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING", "DATE_MISMATCH"):
+        [finding] = _by_code(out, code)
+        assert finding.severity == Severity.LOW
+        assert "poco fiable (40 %)" in finding.message
+
+
+def test_reliable_reading_keeps_the_rule_severity():
+    exp = expense(date=D(2024, 3, 20), link_confidence="low")
+    clean = seg(fecha=D(2024, 3, 1), confianza_ocr=95.0)
+    out = run(xunta(), [(exp, [clean])])
+    rules = xunta()
+    for code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING", "DATE_MISMATCH"):
+        [finding] = _by_code(out, code)
+        assert finding.severity == rules.rules[code].severity
+        assert not finding.message.startswith("Revisar la lectura")
+        assert finding.evidence["lectura_dudosa"] is False
+
+
+def test_softening_thresholds_come_from_the_yaml():
+    exp = expense(link_confidence="high")
+    rules = xunta()
+    for code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING"):
+        rules.rules[code].params["soft_link_confidences"] = []  # switch the link criterion off
+        rules.rules[code].params["soft_below_ocr_confidence"] = 0
+    out = run(rules, [(exp, [seg(confianza_ocr=10.0)])])
+    assert all(
+        f.severity != Severity.LOW
+        for f in out
+        if f.rule_code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING")
+    )
+    for code in ("DONOR_STAMP_MISSING", "PAYMENT_EVIDENCE_MISSING", "DATE_MISMATCH"):
+        params = xunta().params(code)
+        assert params["soft_below_ocr_confidence"] == 70
+        assert params["soft_link_confidences"] == ["high", "medium"]
+
+
 # --- DATE_OUT_OF_PERIOD ---
 
 PERIOD = (D(2024, 1, 1), D(2024, 12, 31))
