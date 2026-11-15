@@ -5,11 +5,8 @@ import pytest
 from app.enums import Donor
 from app.models import Project
 from app.pipeline.match import canonical_key, match_name, order_keys_from_filename, parse_filename
-from app.pipeline.match_config import (
-    AECID_MATCH_CONFIG,
-    XUNTA_MATCH_CONFIG,
-    get_match_config,
-)
+from app.pipeline.match_config import DONOR_DEFAULTS, get_match_config
+from app.samples import PARAGUAY_MATCH_CONFIG, UGANDA_MATCH_CONFIG
 
 
 @pytest.mark.parametrize(
@@ -56,12 +53,12 @@ def test_canonical_key(raw, expected):
     ],
 )
 def test_xunta_filenames(filename, keys):
-    assert order_keys_from_filename(filename, XUNTA_MATCH_CONFIG) == keys
+    assert order_keys_from_filename(filename, UGANDA_MATCH_CONFIG) == keys
 
 
 def test_xunta_5_with_dot_and_word_is_not_a_suffix():
     # "5.Alquiler" is order 5, not "5A"+"lquiler".
-    assert order_keys_from_filename("5.Alquiler sala.pdf", XUNTA_MATCH_CONFIG) == ["5"]
+    assert order_keys_from_filename("5.Alquiler sala.pdf", UGANDA_MATCH_CONFIG) == ["5"]
 
 
 @pytest.mark.parametrize(
@@ -79,14 +76,14 @@ def test_xunta_5_with_dot_and_word_is_not_a_suffix():
     ],
 )
 def test_aecid_filenames(filename, keys, subnumbers):
-    ref = parse_filename(filename, AECID_MATCH_CONFIG)
+    ref = parse_filename(filename, PARAGUAY_MATCH_CONFIG)
     assert (list(ref.keys) if ref else []) == keys
     if ref:
         assert ref.subnumbers is subnumbers
 
 
 def test_aecid_contract_matches_by_issuer_not_by_number():
-    ref = parse_filename("CONTRATO YBY PORA (1).PDF", AECID_MATCH_CONFIG)
+    ref = parse_filename("CONTRATO YBY PORA (1).PDF", PARAGUAY_MATCH_CONFIG)
     assert ref is not None and not ref.keys
     assert ref.issuer_query == "Yvy Pora" and ref.min_score == 85
 
@@ -110,14 +107,16 @@ def test_prefix_rules_live_in_config_not_in_logic():
 
 def test_match_name_uses_archive_name_for_zip_members():
     path = "Proj/40-47 nóminas.zip::nóminas/7-EJEMPLO NOMINA JULIO.pdf"
-    assert match_name(path, XUNTA_MATCH_CONFIG) == "40-47 nóminas.zip"
-    assert match_name("Proj/1. Factura.pdf", XUNTA_MATCH_CONFIG) == "1. Factura.pdf"
+    assert match_name(path, UGANDA_MATCH_CONFIG) == "40-47 nóminas.zip"
+    assert match_name("Proj/1. Factura.pdf", UGANDA_MATCH_CONFIG) == "1. Factura.pdf"
 
 
-def test_config_lookup_by_project_then_donor():
-    by_code = Project(name="x", donor=Donor.XUNTA, code="22-PY-136")
-    assert get_match_config(by_code) is AECID_MATCH_CONFIG  # explicit project entry wins
-    assert get_match_config(Project(name="x", donor=Donor.XUNTA, code="OTHER")) is (
-        XUNTA_MATCH_CONFIG
-    )
-    assert get_match_config(Project(name="x", donor=Donor.AECID, code=None)) is AECID_MATCH_CONFIG
+def test_config_is_the_donor_default_with_the_project_overrides():
+    plain = Project(name="x", donor=Donor.AECID, code="OTHER")
+    assert get_match_config(plain) == DONOR_DEFAULTS[Donor.AECID]
+    sample = Project(name="x", donor=Donor.AECID, match_config=PARAGUAY_MATCH_CONFIG)
+    assert get_match_config(sample)["filename_rules"] == PARAGUAY_MATCH_CONFIG["filename_rules"]
+    partial = Project(name="x", donor=Donor.XUNTA, match_config={"carpeta_completa": False})
+    config = get_match_config(partial)
+    assert config["carpeta_completa"] is False
+    assert config["filename_rules"] == DONOR_DEFAULTS[Donor.XUNTA]["filename_rules"]

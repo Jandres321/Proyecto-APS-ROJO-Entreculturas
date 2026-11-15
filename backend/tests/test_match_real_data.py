@@ -16,7 +16,10 @@ from app.pipeline.match import (
 
 
 def run_pipeline(session, donor, code, docs_dir, report_file):
-    project = Project(name=code, donor=donor, code=code)
+    from app.samples import SAMPLE_PROJECTS
+
+    config = next(s.match_config for s in SAMPLE_PROJECTS if s.code == code)
+    project = Project(name=code, donor=donor, code=code, match_config=config)
     session.add(project)
     session.flush()
     ingest_project(session, project.id, report_file)

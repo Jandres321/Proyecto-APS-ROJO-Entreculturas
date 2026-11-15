@@ -14,13 +14,14 @@ from app.models import ExpenseDocument, ExpenseSegment, Finding
 from app.pipeline import match_content as mc
 from app.pipeline import match_hybrid as mh
 from app.pipeline.conciliador import NameReconciler
-from app.pipeline.match_config import KIND_COFINANCED, KIND_INDIRECT, XUNTA_MATCH_CONFIG
+from app.pipeline.match_config import KIND_COFINANCED, KIND_INDIRECT
 from app.pipeline.match_eval import truth_by_expense, validate
+from app.samples import UGANDA_MATCH_CONFIG
 from tests.test_match_content import _doc, _segmento
 from tests.test_match_pipeline import add_expense, new_project
 
 D = dt.date
-REC = NameReconciler(XUNTA_MATCH_CONFIG["name_reconciler"])
+REC = NameReconciler(UGANDA_MATCH_CONFIG["name_reconciler"])
 OFF = mh.HybridOptions(reassign=False, disambiguate_low=False, content_fill=False)
 
 
@@ -297,7 +298,7 @@ def test_order_number_claims_are_reported_only_against_strong_content():
 
 def findings(result, expenses, segments, config=None, names=None):
     return mh.build_hybrid_findings(
-        result, expenses, segments, config or XUNTA_MATCH_CONFIG, names or {}, {}
+        result, expenses, segments, config or UGANDA_MATCH_CONFIG, names or {}, {}
     )
 
 
@@ -316,7 +317,7 @@ def test_doc_missing_when_the_folder_is_complete():
 def test_doc_missing_becomes_informative_when_the_folder_is_only_a_sample():
     expenses = [exp(1, "Gasto uno", 111111), exp(2, "Gasto dos", 222222)]
     res = run(expenses, [], {})
-    sample = {**XUNTA_MATCH_CONFIG, "carpeta_completa": False}
+    sample = {**UGANDA_MATCH_CONFIG, "carpeta_completa": False}
     fs, not_in_sample = findings(res, expenses, [], sample)
     assert mc.RULE_DOC_MISSING not in rules(fs)
     assert not_in_sample == 2
@@ -330,7 +331,7 @@ def test_doc_missing_ignores_indirect_and_cofinanced_expenses():
     ]
     fs, _ = findings(run(expenses, [], {}), expenses, [])
     assert [f.expense_id for f in fs] == [1]
-    sample = {**XUNTA_MATCH_CONFIG, "carpeta_completa": False}
+    sample = {**UGANDA_MATCH_CONFIG, "carpeta_completa": False}
     assert findings(run(expenses, [], {}), expenses, [], sample)[1] == 1  # only the normal one
 
 
@@ -489,7 +490,8 @@ def test_content_reassignment_is_stored_as_a_content_link_and_a_conflict(db_sess
 
 
 def test_a_sample_folder_reports_no_doc_missing_but_counts_the_expenses(db_session):
-    project = new_project(db_session, donor=Donor.AECID, code="SAMPLE-1")  # carpeta_completa: False
+    project = new_project(db_session, donor=Donor.AECID, code="SAMPLE-1")
+    project.match_config = {"carpeta_completa": False}  # the folder is only a sample
     for i in (1, 2, 3):
         add_expense(db_session, project, str(i), i, amount_local=Decimal(i * 1000))
     summary = mc.match_by_segments(db_session, project.id)

@@ -18,11 +18,18 @@ CATALOGO = [
     {"code": "A.I.5", "name": "Materiales y suministros"},
     {"code": "A.I.7", "name": "Viajes, alojamientos y dietas"},
 ]
-GASTO = {"id": 1, "concepto": "Pago a facilitadora de taller de huertas (ejemplo)", "proveedor": "Ejemplo"}
+GASTO = {
+    "id": 1,
+    "concepto": "Pago a facilitadora de taller de huertas (ejemplo)",
+    "proveedor": "Ejemplo",
+}
 
 if __name__ == "__main__":
     llm = get_llm_client()
     out = asyncio.run(llm_suggestions(llm, "aecid", CATALOGO, [GASTO]))
     for s in out.values():
-        print(f"{llm.provider}/{llm.model}: partida {s.partida} (confianza {s.confidence}) - {s.reason}")
+        print(
+            f"{llm.provider}/{llm.model}: partida {s.partida} "
+            f"(confianza {s.confidence}) - {s.reason}"
+        )
     print("tokens:", getattr(llm, "usage", None))

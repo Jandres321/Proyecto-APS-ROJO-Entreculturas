@@ -73,6 +73,9 @@ DEFAULT_PARAMS: dict[str, Any] = {
 _DATE = re.compile(r"\b(\d{1,2})[./-](\d{1,2})[./-](\d{2}|\d{4})\b")
 _EXTENSION = re.compile(r"\.(pdf|xlsx?|zip|docx?|jpe?g|png)$", re.IGNORECASE)
 _LONG_NUMBER = re.compile(r"(?<!\d)(\d{5,})(?!\d)")
+# Used when a project declares no reference pattern: it never matches, so names are compared by
+# concept and month only (and long invoice numbers, if enabled).
+NO_REFERENCES = re.compile(r"(?!x)x(?P<prefijo>)(?P<numero>)")
 
 
 # --- text helpers --------------------------------------------------------------------------
@@ -249,13 +252,14 @@ def _readable_months(months: set[int]) -> str:
 
 class NameReconciler:
     """Configured from the project's ``name_reconciler`` section (see match_config.py):
-    ``reference_pattern`` (regex with groups ``prefijo`` and ``numero``), ``long_numbers``,
+    ``reference_pattern`` (optional regex with groups ``prefijo`` and ``numero``), ``long_numbers``,
     ``hide_order`` (regex of the manual order number at the start of the name), ``synonyms`` and
     ``params`` (overrides of DEFAULT_PARAMS)."""
 
     def __init__(self, config: dict[str, Any]):
         self.params = {**DEFAULT_PARAMS, **config.get("params", {})}
-        self.reference_pattern = re.compile(config["reference_pattern"])
+        pattern = config.get("reference_pattern")
+        self.reference_pattern = re.compile(pattern) if pattern else NO_REFERENCES
         self.long_numbers = bool(config.get("long_numbers", False))
         self.hide_order = re.compile(config["hide_order"]) if config.get("hide_order") else None
         self.synonyms = prepare_synonyms(config.get("synonyms"))

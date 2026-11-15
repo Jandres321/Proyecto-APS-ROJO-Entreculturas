@@ -21,11 +21,7 @@ from app.lectura.pipeline import process_pdfs  # noqa: E402
 from app.pipeline.conciliador import NameReconciler  # noqa: E402
 from app.pipeline.ingest import scan_documents  # noqa: E402
 from app.pipeline.match import match_name  # noqa: E402
-from app.pipeline.match_config import (  # noqa: E402
-    AECID_MATCH_CONFIG,
-    XUNTA_MATCH_CONFIG,
-    MatchConfig,
-)
+from app.pipeline.match_config import MatchConfig  # noqa: E402
 from app.pipeline.match_content import (  # noqa: E402
     ExpenseView,
     SegmentView,
@@ -34,6 +30,7 @@ from app.pipeline.match_content import (  # noqa: E402
 )
 from app.pipeline.match_eval import Validation, truth_by_expense, validate  # noqa: E402
 from app.pipeline.match_hybrid import HybridOptions, HybridResult, hybrid_match  # noqa: E402
+from app.samples import PARAGUAY_MATCH_CONFIG, UGANDA_MATCH_CONFIG  # noqa: E402
 
 PROJECTS = {
     "xunta": dict(
@@ -41,14 +38,14 @@ PROJECTS = {
         folder="DocJustificativa/24-UG-226 Adjumani - Xunta 2024",
         report="Informe_economico_final_Adjuamni_def 14.10.25 v1.xls",
         adapter=XuntaAdapter,
-        config=XUNTA_MATCH_CONFIG,
+        config=UGANDA_MATCH_CONFIG,
     ),
     "aecid": dict(
         title="Paraguay · AECID",
         folder="DocJustificativa/22-PY-136 - AECID",
         report="Informe seguimiento y final_31_10.xlsx",
         adapter=AecidAdapter,
-        config=AECID_MATCH_CONFIG,
+        config=PARAGUAY_MATCH_CONFIG,
     ),
 }
 

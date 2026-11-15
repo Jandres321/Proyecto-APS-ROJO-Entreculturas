@@ -155,7 +155,7 @@ def test_findings_api_lists_and_updates(db_session, project, client):
     finding = add_finding(db_session, project, "DOC_MISSING", severity=Severity.HIGH)
     app.dependency_overrides[get_session] = lambda: db_session
     try:
-        url = f"/api/projects/{project.id}/findings"
+        url = f"/api/projects/{project.key}/findings"
         assert [f["id"] for f in client.get(url, params={"status": "open"}).json()] == [finding.id]
 
         patched = client.patch(
@@ -305,7 +305,9 @@ def test_document_statuses_cover_every_case(db_session, project):
 def test_a_sample_folder_marks_missing_documents_as_not_in_the_sample(db_session):
     from app.review import NOT_IN_SAMPLE, document_statuses
 
-    sample = Project(name="muestra", donor=Donor.AECID, code="SAMPLE-2")  # carpeta_completa: False
+    sample = Project(
+        name="muestra", donor=Donor.AECID, code="SAMPLE-2", match_config={"carpeta_completa": False}
+    )
     db_session.add(sample)
     db_session.flush()
     e = add_expense(db_session, sample, "1", amount_donor=D(10))

@@ -16,7 +16,7 @@ from sqlalchemy.orm import Session
 
 from app.models import Project
 from app.pipeline.budget import compute_execution
-from app.pipeline.export import _budget_tables, _findings_table, _format
+from app.pipeline.export import budget_tables, findings_table, format_sheet
 from app.review_view import project_review
 
 VERDICT_TRAFFIC = {
@@ -164,11 +164,11 @@ def export_report_xlsx(session: Session, project_id: int, out_path: Path) -> Pat
         raise LookupError(f"Project {project_id} not found")
     view = project_review(session, project)
     by_expense = _expense_rows(view["expenses"])
-    partidas, limits = _budget_tables(compute_execution(session, project_id))
+    partidas, limits = budget_tables(compute_execution(session, project_id))
     sheets = [
         ("Resumen", _summary(view), ()),
         ("Análisis por gasto", by_expense, ()),
-        ("Incidencias", _findings_table(session, project_id), ()),
+        ("Incidencias", findings_table(session, project_id), ()),
         ("Presupuesto", partidas, ("Desviación %",)),
         ("Topes", limits, ("Porcentaje", "Máximo %")),
     ]
@@ -176,7 +176,7 @@ def export_report_xlsx(session: Session, project_id: int, out_path: Path) -> Pat
     with pd.ExcelWriter(out_path, engine="openpyxl") as writer:
         for name, frame, percent in sheets:
             frame.to_excel(writer, sheet_name=name, index=False)
-            _format(writer.sheets[name], frame, percent)
+            format_sheet(writer.sheets[name], frame, percent)
         summary = writer.sheets["Resumen"]
         summary.column_dimensions["A"].width = 72
         summary.column_dimensions["B"].width = 40

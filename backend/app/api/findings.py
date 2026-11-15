@@ -7,20 +7,25 @@ from app.enums import FindingStatus, Severity
 from app.review import list_findings as _list_findings
 from app.review import set_decision
 from app.schemas import FindingOut, FindingUpdate
+from app.services.projects import get_project
 
 router = APIRouter(tags=["findings"])
 
 
-@router.get("/projects/{project_id}/findings", response_model=list[FindingOut])
+@router.get("/projects/{key}/findings", response_model=list[FindingOut])
 def list_findings(
-    project_id: int,
+    key: str,
     session: SessionDep,
     status: FindingStatus | None = None,
     severity: Severity | None = None,
 ) -> list[FindingOut]:
+    try:
+        project = get_project(session, key)
+    except LookupError:
+        raise HTTPException(404, "Proyecto no encontrado") from None
     return [
         FindingOut.model_validate(f)
-        for f in _list_findings(session, project_id, status=status, severity=severity)
+        for f in _list_findings(session, project.id, status=status, severity=severity)
     ]
 
 

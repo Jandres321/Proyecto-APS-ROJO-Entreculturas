@@ -1,7 +1,7 @@
-.PHONY: up down migrate test lint inspect match-report read-pdfs compare-cruce evaluar-hibrido checks ui
+.PHONY: up down migrate test lint inspect match-report read-pdfs compare-cruce evaluar-hibrido checks
 
 up:
-	docker compose up --build
+	docker compose up --build api
 
 down:
 	docker compose down
@@ -14,7 +14,6 @@ test:
 
 lint:
 	docker compose run --rm --no-deps api sh -c "ruff check . && ruff format --check ."
-	cd frontend && npm run lint
 
 inspect:
 	docker compose run --rm --no-deps api python scripts/inspect_ingest.py
@@ -34,5 +33,3 @@ evaluar-hibrido:
 checks:
 	docker compose run --rm api python scripts/checks_report.py
 
-ui:
-	docker compose up --build ui

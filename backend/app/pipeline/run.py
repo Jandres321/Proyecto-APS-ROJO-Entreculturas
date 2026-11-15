@@ -1,6 +1,7 @@
-"""Whole review pipeline for one project, step by step (used by the Streamlit app).
+"""Whole review pipeline for one project, step by step (launched by app/services/jobs.py).
 
-ingest report -> register documents -> read PDFs -> match by content -> checks -> budget
+ingest report -> register documents -> read PDFs -> match (names propose, content verifies) ->
+checks -> partida of each expense -> budget and caps
 
 Every step persists its findings in the `finding` table, replacing the OPEN ones of the previous
 run and keeping the reviewer's decisions. The exception is the report ingestion: it recreates the
@@ -8,6 +9,7 @@ expenses (and with them the findings hanging from them), so it only runs when th
 expenses yet or when `reread_report=True`.
 """
 
+import asyncio
 from collections.abc import Callable
 from dataclasses import dataclass, field
 
@@ -15,51 +17,16 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from app.config import get_settings
-from app.enums import Donor
+from app.enums import LlmMode
 from app.lectura.project import read_project_documents
 from app.models import Document, Expense, Project
 from app.pipeline.budget import BudgetAnalysis, run_budget
-import asyncio
-
 from app.pipeline.checks import run_checks
 from app.pipeline.classify import flag_doubtful_imputations, suggest_partidas
 from app.pipeline.ingest import ingest_project
 from app.pipeline.match import register_documents
 from app.pipeline.match_content import ContentMatchSummary, match_by_segments
 from app.rules import sync_rules
-
-
-@dataclass(frozen=True)
-class PilotProject:
-    key: str
-    title: str
-    donor: Donor
-    code: str
-    folder: str  # relative to DATA_DIR
-    report: str  # file inside `folder`
-
-
-PILOTS: dict[str, PilotProject] = {
-    p.key: p
-    for p in (
-        PilotProject(
-            "xunta",
-            "Uganda · Adjumani · Xunta 2024",
-            Donor.XUNTA,
-            "24-UG-226",
-            "DocJustificativa/24-UG-226 Adjumani - Xunta 2024",
-            "Informe_economico_final_Adjuamni_def 14.10.25 v1.xls",
-        ),
-        PilotProject(
-            "aecid",
-            "Paraguay · AECID",
-            Donor.AECID,
-            "22-PY-136",
-            "DocJustificativa/22-PY-136 - AECID",
-            "Informe seguimiento y final_31_10.xlsx",
-        ),
-    )
-}
 
 STEPS = (
     ("ingest", "Leyendo el informe económico"),
@@ -88,30 +55,23 @@ class RunSummary:
     report_reread: bool = False
 
 
-def get_or_create_project(session: Session, pilot: PilotProject) -> Project:
-    project = session.scalar(select(Project).where(Project.code == pilot.code))
-    if project is None:
-        project = Project(name=pilot.title, donor=pilot.donor, code=pilot.code)
-        session.add(project)
-        session.commit()
-    return project
-
-
 def run_pipeline(
     session: Session,
-    pilot: PilotProject,
+    project: Project,
     *,
     reread_report: bool = False,
     on_progress: Progress | None = None,
 ) -> RunSummary:
-    """Run every step for a pilot project and return a summary. Raises `FileNotFoundError` when
-    the report or the documents folder are not in DATA_DIR (the rest of the pipeline resolves
-    document paths against the same setting)."""
+    """Run every step for a project whose files are already in its folder under DATA_DIR (see
+    `app/services/sources.py`) and return a summary. Raises `FileNotFoundError` when the report
+    or the folder are missing."""
     data_dir = get_settings().data_dir
     if data_dir is None or not data_dir.is_dir():
         raise FileNotFoundError("DATA_DIR no está definido o no existe")
-    folder = data_dir / pilot.folder
-    report = folder / pilot.report
+    if not project.folder or not project.report_file:
+        raise FileNotFoundError("el proyecto no tiene carpeta o informe económico")
+    folder = data_dir / project.folder
+    report = folder / project.report_file
     if not report.is_file():
         raise FileNotFoundError(f"No se encuentra el informe: {report}")
 
@@ -119,7 +79,6 @@ def run_pipeline(
         if on_progress:
             on_progress(step, fraction, dict(STEPS)[step])
 
-    project = get_or_create_project(session, pilot)
     summary = RunSummary(project.id)
 
     notify("ingest")
@@ -141,14 +100,17 @@ def run_pipeline(
 
     notify("reading")
     summary.segments = read_project_documents(
-        session, project.id, progress=lambda done, total: notify("reading", done / max(total, 1))
+        session,
+        project.id,
+        use_llm=project.llm_mode is not LlmMode.OFF,
+        progress=lambda done, total: notify("reading", done / max(total, 1)),
     )
 
     notify("matching")
     summary.matching = match_by_segments(session, project.id)
 
     notify("checks")
-    sync_rules(session, pilot.donor)
+    sync_rules(session, project.donor)
     summary.check_findings = len(run_checks(session, project.id))
 
     notify("partidas")

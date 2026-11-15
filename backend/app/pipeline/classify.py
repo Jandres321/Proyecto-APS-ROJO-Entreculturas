@@ -28,6 +28,7 @@ from app.enums import Donor, Severity
 from app.llm.base import LLMClient
 from app.models import Expense, Project
 from app.schemas import FindingIn
+from app.services.findings import sync_findings
 
 PARTIDA_MISMATCH = "PARTIDA_MISMATCH"
 MIN_CONFIDENCE_FINDING = 0.75
@@ -38,38 +39,112 @@ MIN_CONFIDENCE_FINDING = 0.75
 KEYWORDS: dict[str, list[str]] = {
     "auditoria": [r"\bauditori"],
     "evaluacion": [r"\bevaluacion (final|externa|intermedia)", r"\bevaluador"],
-    "financieros": [r"\bcomision(es)? bancari", r"\bcomision\b", r"\bgastos? bancari", r"\bbank (fee|charge)"],
+    "financieros": [
+        r"\bcomision(es)? bancari",
+        r"\bcomision\b",
+        r"\bgastos? bancari",
+        r"\bbank (fee|charge)",
+    ],
     "personal": [
-        r"\bsalari", r"\bnomina", r"\bpayroll", r"\bsueldo", r"\bhaberes\b", r"\baguinaldo",
-        r"\baporte patronal", r"\bips\b", r"\bnssf\b", r"\bfondo (de )?pensiones", r"\bpension",
-        r"\bseguro medico", r"\bseguridad social", r"\bliquidacion haberes", r"\bvacaciones",
+        r"\bsalari",
+        r"\bnomina",
+        r"\bpayroll",
+        r"\bsueldo",
+        r"\bhaberes\b",
+        r"\baguinaldo",
+        r"\baporte patronal",
+        r"\bips\b",
+        r"\bnssf\b",
+        r"\bfondo (de )?pensiones",
+        r"\bpension",
+        r"\bseguro medico",
+        r"\bseguridad social",
+        r"\bliquidacion haberes",
+        r"\bvacaciones",
     ],
     "viajes": [
-        r"\bcombustible", r"\bgasolina", r"\bgasoil", r"\bdiesel", r"\bfuel\b", r"\bnafta",
-        r"\bpasaje", r"\bbillete", r"\bvuelo", r"\balojamiento", r"\bhotel", r"\bestancia",
-        r"\bdieta", r"\bviatico", r"\bperdiem", r"\bper diem", r"\btransporte",
-        r"\bliquidacion (individual|colectiva)", r"\bliqui \d", r"\bdesplazamiento", r"\bpeaje",
+        r"\bcombustible",
+        r"\bgasolina",
+        r"\bgasoil",
+        r"\bdiesel",
+        r"\bfuel\b",
+        r"\bnafta",
+        r"\bpasaje",
+        r"\bbillete",
+        r"\bvuelo",
+        r"\balojamiento",
+        r"\bhotel",
+        r"\bestancia",
+        r"\bdieta",
+        r"\bviatico",
+        r"\bperdiem",
+        r"\bper diem",
+        r"\btransporte",
+        r"\bliquidacion (individual|colectiva)",
+        r"\bliqui \d",
+        r"\bdesplazamiento",
+        r"\bpeaje",
     ],
     "alquiler": [r"\balquiler", r"\barrendamiento", r"\brent\b"],
-    "construccion": [r"\bconstruccion", r"\breforma", r"\bmateriales de construccion", r"\bcemento", r"\bladrillo"],
+    "construccion": [
+        r"\bconstruccion",
+        r"\breforma",
+        r"\bmateriales de construccion",
+        r"\bcemento",
+        r"\bladrillo",
+    ],
     "equipos": [
-        r"\bordenador", r"\bportatil", r"\blaptop", r"\bimpresora\b", r"\bproyector",
-        r"\bmotocicleta nueva", r"\benvasadora", r"\bmaquina", r"\bequipo(s)? (informatico|de)",
-        r"\bmobiliario", r"\btanque", r"\bmotobomba", r"\bdesgranadora", r"\binventariable",
-        r"\bsistema de riego", r"\bmateriales de riego",
+        r"\bordenador",
+        r"\bportatil",
+        r"\blaptop",
+        r"\bimpresora\b",
+        r"\bproyector",
+        r"\bmotocicleta nueva",
+        r"\benvasadora",
+        r"\bmaquina",
+        r"\bequipo(s)? (informatico|de)",
+        r"\bmobiliario",
+        r"\btanque",
+        r"\bmotobomba",
+        r"\bdesgranadora",
+        r"\binventariable",
+        r"\bsistema de riego",
+        r"\bmateriales de riego",
     ],
     "servicios": [
-        r"\bfacilitador", r"\bformador", r"\btallerista", r"\bconsultor", r"\bservicio profesional",
-        r"\banalisis de suelo", r"\bdiagnostico de fincas", r"\bhonorarios", r"\bcapacitador",
+        r"\bfacilitador",
+        r"\bformador",
+        r"\btallerista",
+        r"\bconsultor",
+        r"\bservicio profesional",
+        r"\banalisis de suelo",
+        r"\bdiagnostico de fincas",
+        r"\bhonorarios",
+        r"\bcapacitador",
     ],
     "funcionamiento": [
-        r"\belectricidad", r"\bfactura (de )?agua", r"\bagua oficina", r"\btelefon", r"\binternet",
-        r"\brecoleccion de residuos", r"\blimpieza oficina", r"\breparacion oficina",
+        r"\belectricidad",
+        r"\bfactura (de )?agua",
+        r"\bagua oficina",
+        r"\btelefon",
+        r"\binternet",
+        r"\brecoleccion de residuos",
+        r"\blimpieza oficina",
+        r"\breparacion oficina",
     ],
     "materiales": [
-        r"\binsumo", r"\bsemilla", r"\bfertilizante", r"\bmaterial(es)?\b", r"\bkit\b",
-        r"\bimpresion", r"\bpapeleria", r"\bmaterial de oficina",
-        r"\bproductos? para comercializacion", r"\bnfi\b", r"\bbioinsumo", r"\bcompostaje",
+        r"\binsumo",
+        r"\bsemilla",
+        r"\bfertilizante",
+        r"\bmaterial(es)?\b",
+        r"\bkit\b",
+        r"\bimpresion",
+        r"\bpapeleria",
+        r"\bmaterial de oficina",
+        r"\bproductos? para comercializacion",
+        r"\bnfi\b",
+        r"\bbioinsumo",
+        r"\bcompostaje",
         r"\bplantin",
     ],
     # Food for activities: Xunta puts it with travel/subsistence (dietas), AECID with supplies.
@@ -169,10 +244,13 @@ def classify_expense(
         if found:
             hits[cat] = found
     if not hits:
-        return Suggestion(None, 0.0, "Ninguna palabra clave reconocida en el concepto.", "sin_regla")
+        return Suggestion(
+            None, 0.0, "Ninguna palabra clave reconocida en el concepto.", "sin_regla"
+        )
 
     # Concept words weigh more than issuer words; the most specific category wins ties.
     concept_text = normalize(concept)
+
     def weight(cat: str) -> tuple[int, int]:
         in_concept = sum(1 for p in _COMPILED[cat] if p.search(concept_text))
         return (in_concept, len(hits[cat]))
@@ -247,7 +325,10 @@ def _catalog(donor: str) -> list[dict]:
     from app.adapters import AecidAdapter, XuntaAdapter
 
     adapter = AecidAdapter() if donor == Donor.AECID.value else XuntaAdapter()
-    return [{"code": p.code, "name": p.name, "definition": p.definition[:200]} for p in adapter.partida_catalog()]
+    return [
+        {"code": p.code, "name": p.name, "definition": p.definition[:200]}
+        for p in adapter.partida_catalog()
+    ]
 
 
 async def suggest_partidas(
@@ -292,7 +373,6 @@ async def suggest_partidas(
 
 def flag_doubtful_imputations(session: Session, project_id: int) -> list[FindingIn]:
     """PARTIDA_MISMATCH where a clear suggestion differs from the declared partida."""
-    from app.pipeline.match import _sync_findings
 
     findings: list[FindingIn] = []
     for e in session.scalars(select(Expense).where(Expense.project_id == project_id)):
@@ -321,6 +401,6 @@ def flag_doubtful_imputations(session: Session, project_id: int) -> list[Finding
                 },
             )
         )
-    _sync_findings(session, project_id, {PARTIDA_MISMATCH}, findings)
+    sync_findings(session, project_id, {PARTIDA_MISMATCH}, findings)
     session.commit()
     return findings

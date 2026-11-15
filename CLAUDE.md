@@ -88,7 +88,7 @@ Hay que tratarlos como imágenes (render con PyMuPDF → LLM multimodal) y detec
 - **Datos/PDF:** pandas, openpyxl, xlrd, PyMuPDF, rapidfuzz.
 - **LLM:** multimodal con salida JSON estructurada, detrás de una interfaz propia
   (proveedor configurable por `.env`).
-- **Frontend:** React + Vite + TypeScript + TanStack Table + react-pdf.
+- **Interfaz:** una página estática servida por la API (`backend/app/web/index.html`), sin Node. Los proyectos (ejemplo, subida, Google Drive) son filas de la tabla `project`; ver «Proyectos y fuentes de archivos» en README.md.
 - **Infra:** docker-compose con servicios `db`, `api`, `web`.
 
 ## Reglas de trabajo
@@ -111,7 +111,7 @@ Este repositorio junta dos trabajos del mismo reto (rama `integracion-revisor`):
 
 | Pieza | Carpetas | Qué es | Convenciones |
 |---|---|---|---|
-| **Revisor de justificación** (este documento) | `backend/`, `frontend/`, `docker-compose.yml`, `Makefile` | La aplicación: API, base de datos, lectura de PDF, cruce híbrido, reglas, presupuesto y app de revisión. **Es la interfaz que se mantiene** | Código y comentarios en inglés; textos al usuario en español |
+| **Revisor de justificación** (este documento) | `backend/`, `docker-compose.yml`, `Makefile` | La aplicación: API, base de datos, lectura de PDF, cruce híbrido, reglas, presupuesto y app de revisión. **Es la interfaz que se mantiene** | Código y comentarios en inglés; textos al usuario en español |
 | **Conciliador** (línea de comandos) | `src/conciliador/`, `config/`, `tests/`, `pyproject.toml` de la raíz | El conciliador original por nombre de archivo, con lectura del contenido con Claude, Google Drive y un YAML por proyecto (Uganda, ECHO, La Rioja). Documentado en [docs/conciliador.md](docs/conciliador.md) | Código, comentarios y mensajes en español (ver `AGENTS.md`) |
 
 - `backend/app/pipeline/conciliador.py` es un **port** de `src/conciliador/cruce.py`. Si se corrige la lógica

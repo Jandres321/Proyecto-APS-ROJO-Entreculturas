@@ -1,22 +1,45 @@
 """FastAPI application entry point."""
 
+import logging
+from collections.abc import AsyncIterator
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
+from sqlalchemy.exc import OperationalError
 
-from app import __version__
-from app.api import findings, projects, ui
+from app import __version__, db
+from app.api import documents, findings, projects
+from app.api import settings as settings_routes
 from app.config import get_settings
+from app.samples import ensure_sample_projects
 from app.schemas import HealthOut
+from app.services.jobs import mark_interrupted_jobs
 
 settings = get_settings()
+logger = logging.getLogger(__name__)
+
+
+@asynccontextmanager
+async def lifespan(_: FastAPI) -> AsyncIterator[None]:
+    """On startup: close the runs a previous process left half-done and make sure the sample
+    projects exist (when their folders are in DATA_DIR)."""
+    try:
+        with db.SessionLocal() as session:
+            mark_interrupted_jobs(session)
+            ensure_sample_projects(session)
+    except OperationalError as error:  # the API still serves /health and explains the problem
+        logger.warning("Base de datos no disponible al arrancar: %s", error)
+    yield
+
 
 app = FastAPI(
     title="Revisor de justificación",
     description="Revisión asistida de la justificación económica de proyectos de cooperación.",
     version=__version__,
+    lifespan=lifespan,
 )
 
 app.add_middleware(
@@ -33,9 +56,10 @@ def health() -> HealthOut:
     return HealthOut(status="ok", version=__version__)
 
 
+app.include_router(settings_routes.router, prefix="/api")
 app.include_router(projects.router, prefix="/api")
+app.include_router(documents.router, prefix="/api")
 app.include_router(findings.router, prefix="/api")
-app.include_router(ui.router, prefix="/api")
 
 WEB_APP = Path(__file__).parent / "web" / "index.html"
 
