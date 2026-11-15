@@ -135,17 +135,19 @@ def _segment_view(segment: Segmento, link: ExpenseSegment | None = None) -> dict
     }
 
 
-def project_review(session: Session, project: Project) -> dict[str, Any]:
+def project_review(
+    session: Session, project: Project, *, only_expense: int | None = None
+) -> dict[str, Any]:
     """Everything the web app shows for a project: its expenses (documents, what was read,
-    findings, verdict), the findings that hang from no expense and the totals."""
+    findings, verdict), the findings that hang from no expense and the totals.
+
+    `only_expense` builds the view of that one expense (the totals then cover only it): used
+    after a decision, so saving does not recompute the whole project."""
     statuses = document_statuses(session, project.id)
-    expenses = list(
-        session.scalars(
-            select(Expense)
-            .where(Expense.project_id == project.id)
-            .order_by(Expense.source_row.nulls_last(), Expense.id)
-        )
-    )
+    query = select(Expense).where(Expense.project_id == project.id)
+    if only_expense is not None:
+        query = query.where(Expense.id == only_expense)
+    expenses = list(session.scalars(query.order_by(Expense.source_row.nulls_last(), Expense.id)))
     documents = {
         d.id: d for d in session.scalars(select(Document).where(Document.project_id == project.id))
     }
@@ -236,7 +238,11 @@ def project_review(session: Session, project: Project) -> dict[str, Any]:
             }
         )
 
-    general = [finding_view(session, f) for f in by_expense.get(None, [])]
+    general = (
+        []
+        if only_expense is not None
+        else [finding_view(session, f) for f in by_expense.get(None, [])]
+    )
     counts = {s.value: 0 for s in FindingStatus}
     for group in by_expense.values():
         for f in group:

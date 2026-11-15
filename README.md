@@ -423,37 +423,41 @@ código ni registros en archivos JSON. Cada proyecto tiene:
 
 Documentación interactiva en http://localhost:8000/docs.
 
-## App de revisión web (`backend/app/web/index.html`)
+## App de revisión web (`backend/app/web/`)
 
-Interfaz única para el técnico. Es una sola página estática que sirve la API en `/` y que habla con `/api`:
-no necesita Node ni internet.
+Interfaz única para el técnico. Es una página estática (`index.html`) con su lógica en módulos ES
+(`web/js/`), que sirve la propia API en `/` y `/js/…` y que habla con `/api`. Sin framework, sin Node en
+producción, sin recursos de internet (funciona sin conexión) y sin guardar datos en el navegador.
 
-**De dónde sale el diseño.** El aspecto (barra superior, tarjetas por pasos, tarjetas semáforo que filtran y
-**una fila desplegable por gasto**) viene del prototipo `app_voluntariado` del equipo. De ese prototipo se ha
-tomado **solo la estética**: sus datos venían escritos dentro de la página y los campos «leídos del PDF» eran
-copia del listado, así que sus resultados no medían nada. Aquí **todo lo que se ve sale de la base de datos**:
+**Todo lo que se ve sale del servidor.** El veredicto de cada gasto (*Bien*, *Necesita revisión*, *No aplica*),
+sus motivos y la comparación «Informe frente a PDF» los calcula el backend; la página no decide nada. Un dato que
+no se ha leído dentro del PDF se muestra como *No leído* (en ámbar), nunca con el valor del listado.
 
-- Un dato que no se ha leído dentro del PDF se muestra como *no leído*; nunca se rellena con el del listado.
-- No hay porcentaje de confianza inventado: el veredicto de cada gasto se calcula con su estado de justificante
-  y sus incidencias (`app/review_view.py → expense_verdict`), y la confianza es la del cruce (alta/media/baja).
-- No hay incidencias escritas a mano para casos concretos.
+Menú lateral fijo con el selector de proyecto y estos apartados (la dirección es `#/<proyecto>/<apartado>`,
+y en la revisión `#/<proyecto>/revision/<id del gasto>`):
 
-| Paso | Qué hace |
+| Apartado | Qué hace |
 |---|---|
-| **1. Proyecto y análisis** | Pestañas con los proyectos (📤 subido, ☁️ Drive). **Lanzar análisis** ejecuta todo en segundo plano con barra de progreso. **Ajustes del proyecto**: periodo, lectura con IA, informe y borrar. **Nuevo proyecto**: subir el informe y los justificantes (PDF o .zip) o conectar una carpeta de Drive, con donante, periodo y lectura con IA |
-| **2. Reglas, presupuesto y topes** | Reglas activas del donante, aprobado frente a ejecutado por partida con su semáforo y topes |
-| **3. Listado de gastos** | Una fila por gasto con su veredicto, filtros y orden. Al desplegar: justificantes vinculados, lo leído dentro del PDF por segmento e incidencias con su evidencia |
-| **4. Incidencias generales** | Las que no cuelgan de un gasto: presupuesto, topes, documentos sin gasto |
+| **Revisión** (por defecto) | A la izquierda, una línea por gasto: nº de orden, proveedor, importe del listado, estado y primer motivo; pestañas *Por revisar*, *Revisados*, *Bien*, *No aplica*, *Todos* y buscador. A la derecha, el gasto: «Informe frente a PDF» (campo, listado, leído, si coincide), motivos, incidencias en frases (con los *Datos técnicos* plegados), la página del PDF incrustada (pasar página, girar, zoom, abrir el original) y, fijos abajo, **Correcto** e **Incidencia real** con su nota |
+| **Nuevo proyecto** | Subir el informe y los justificantes (PDF o .zip) o conectar una carpeta de Drive, con donante, lectura con IA y **periodo de ejecución obligatorio** |
+| **Presupuesto y topes** | Aprobado frente a ejecutado por partida, topes del donante y reglas que se comprueban |
+| **Incidencias generales** | Las que no cuelgan de un gasto (presupuesto, topes, documentos sin gasto), con *Es real* / *Falso positivo* / *Reabrir* y nota |
+| **Ajustes** | Periodo, lectura con IA, informe, **Analizar** (con *Releer el informe*) y borrar el proyecto |
 
-- **Decisión por incidencia:** *Aceptar*, *Falso positivo* o *Reabrir*, con nota. Sobrevive a relanzar el
-  análisis. En cada gasto: *Dar por bueno* y *Confirmar* sobre todas sus incidencias abiertas.
-- **PDF al lado:** *Ver en el PDF* abre la página del problema, con giro de 90° y enlace al original.
-- **Informe Excel:** *Descargar informe Excel* (`pipeline/report.py`): Resumen, Análisis por gasto (una fila por
-  gasto: veredicto, justificante, lo leído e incidencias), Incidencias, Presupuesto y Topes, con las decisiones.
-- **IA externa:** la página muestra si está permitida (`.env`). No pide ni guarda claves en el navegador.
+Al pie del menú, una línea dice qué hace el proyecto con la IA («Todo en local» o el proveedor y el modo).
 
-*Releer el informe* recrea los gastos y descarta las decisiones sobre incidencias de gastos concretos (las de
-presupuesto se conservan); por eso no se hace por defecto al relanzar.
+- **Decidir es por gasto y de uno en uno.** No hay decisiones positivas en bloque. *Correcto* exige nota si algún
+  motivo es bloqueante (lo comprueba también el servidor). Tras decidir se pasa al siguiente pendiente; si el
+  guardado falla, no se avanza y se muestra el error.
+- **Atajos:** `J`/`K` o `↓`/`↑` cambian de gasto, `C` es *Correcto*, `I` es *Incidencia real*, `←`/`→` pasan la
+  página del PDF. No se disparan mientras se escribe; `Esc` sale de la nota.
+- **Informe Excel:** *Descargar Excel* (`pipeline/report.py`), con las decisiones tomadas.
+- **Datos de ejemplo:** con `?mock=1` (por ejemplo `http://localhost:8000/?mock=1`) la página funciona sin
+  base de datos, con datos inventados de `web/js/mock.js`; `&fallo=1` hace fallar cada decisión para probar
+  el error. Lo que solo funciona así está en [docs/pendiente_web.md](docs/pendiente_web.md).
+
+*Releer el informe* recrea los gastos y descarta las decisiones sobre gastos concretos (las de presupuesto se
+conservan); por eso no se hace por defecto al relanzar.
 
 ## Google Drive (`app/drive.py`)
 
@@ -595,7 +599,7 @@ backend/app/
   llm/            interfaz LLMClient + factory (fake, anthropic)
   drive.py        Google Drive (listar y copiar una carpeta)
   review.py, review_view.py   decisiones del revisor y vista por gasto para la app web
-  web/            app de revisión web: una página estática (index.html) que sirve la API en /
+  web/            app de revisión web: index.html (que sirve la API en /) y sus módulos en js/
 backend/alembic/  migraciones
 backend/rules/    reglas por donante (YAML)
 src/conciliador/  conciliador original por línea de comandos (legado)

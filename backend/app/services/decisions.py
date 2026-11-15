@@ -27,7 +27,7 @@ def set_expense_decision(
     if expense is None:
         raise LookupError(f"Expense {expense_id} not found")
     project = session.get(Project, expense.project_id)
-    current = next(e for e in project_review(session, project)["expenses"] if e["id"] == expense_id)
+    current = project_review(session, project, only_expense=expense_id)["expenses"][0]
     note = (note or "").strip() or None
     if (
         status == ReviewDecision.CORRECT
@@ -44,4 +44,4 @@ def set_expense_decision(
         None if status == ReviewDecision.PENDING else current["fingerprint"]
     )
     session.commit()
-    return next(e for e in project_review(session, project)["expenses"] if e["id"] == expense_id)
+    return project_review(session, project, only_expense=expense_id)["expenses"][0]
