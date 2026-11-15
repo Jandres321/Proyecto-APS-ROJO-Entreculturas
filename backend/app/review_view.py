@@ -51,6 +51,7 @@ RULE_LABELS_ES = {
     "DOC_DUPLICATE": "Archivo duplicado",
     "AMOUNT_MISMATCH": "El importe no coincide",
     "DATE_MISMATCH": "La fecha no coincide",
+    "DATE_OUT_OF_PERIOD": "Fecha fuera del periodo del proyecto",
     "DONOR_STAMP_MISSING": "Falta el sello del donante",
     "NOT_AN_INVOICE": "No es una factura válida",
     "PAYMENT_EVIDENCE_MISSING": "Falta la prueba de pago",

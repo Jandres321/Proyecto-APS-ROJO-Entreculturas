@@ -237,7 +237,7 @@ renombrados al azar**. Resultados (14/11/2026):
 
 ## Comprobaciones de justificantes (`pipeline/checks.py` + `backend/rules/<donante>.yaml`)
 
-Sobre cada gasto y los segmentos que lo respaldan se ejecutan nueve comprobaciones. **Los umbrales,
+Sobre cada gasto y los segmentos que lo respaldan se ejecutan diez comprobaciones. **Los umbrales,
 tolerancias, requisitos de documentos, la referencia normativa y la severidad están en el YAML del
 donante**, no en el código (`app/rules.py` lo carga y valida: faltar una regla o un código mal escrito
 es un error; una regla se apaga con `active: false`). `sync_rules` las vuelca a la tabla `rule`.
@@ -252,6 +252,7 @@ es un error; una regla se apaga con `active: false`). `sync_rules` las vuelca a 
 |---|---|---|---|
 | `AMOUNT_MISMATCH` (alta) | el importe del documento ≠ el del listado (local, euros o imputado; ±1 %; admite la suma si un documento respalda varios gastos) | sí | sí |
 | `DATE_MISMATCH` (media) | fecha del documento ≠ fecha del listado (±3 días); fecha de pago del listado ≠ fecha del justificante bancario | + fecha de pago | solo documento |
+| `DATE_OUT_OF_PERIOD` (media) | fecha del documento o de pago (listado o justificante bancario) fuera del periodo del proyecto (`start_date`/`end_date`, con días de margen en el YAML); sin periodo no se aplica; si la fecha sale de un OCR dudoso, severidad baja | sí | sí |
 | `DONOR_STAMP_MISSING` (media) | falta el sello, el nº de expediente o el % de imputación (o el % no coincide con el listado) | % siempre | % solo si la imputación es parcial |
 | `NOT_AN_INVOICE` (media) | recibo o proforma presentados como factura; factura sin nº, emisor o fecha (baja: puede ser fallo de lectura) | partidas de bienes y servicios | idem |
 | `PAYMENT_EVIDENCE_MISSING` (alta) | sin justificante bancario (transferencia) o, en efectivo, sin sello «pagado» | sello exigido | no exigido (la Guía lo exime en Paraguay, pág. 167) |
@@ -280,8 +281,9 @@ Paraguay, 9 en los 6 gastos con documento.
 - Las comprobaciones de **sello, fecha y emisor son tan buenas como el OCR**: en Uganda el sello de Xunta
   («Funded by: Xunta de Galicia / Code / File number») se reconoce cuando se lee, pero en varios PDF el sello no sale en
   el texto y la incidencia es un falso positivo (el mensaje lo avisa). Misma limitación para las fechas manuscritas.
-- Dos controles que `Rules.xlsx` incluye **no están implementados** aquí: plazo de ejecución (el proyecto no
-  guarda sus fechas) y la traducción de idiomas. Los topes por partida no son por gasto: viven en
+- Un control que `Rules.xlsx` incluye **no está implementado**: la traducción de idiomas. El plazo de ejecución
+  (`DATE_OUT_OF_PERIOD`) se lee con `getattr(project, "start_date" / "end_date", None)`: **hasta que el modelo de
+  proyectos tenga esas columnas la regla no se aplica** (ver `docs/integracion_pendiente.md`). Los topes por partida no son por gasto: viven en
   [Presupuesto y topes](#presupuesto-y-topes-pipelinebudgetpy).
 - `DONOR_STAMP_MISSING` y `NOT_AN_INVOICE` son heurísticos; `ILLEGIBLE` no tiene norma detrás (criterio de
   Entreculturas) y así consta en su `reference`.

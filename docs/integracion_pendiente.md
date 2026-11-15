@@ -24,3 +24,16 @@ Implementado en `app/lectura/` (`LlmReadOptions`, `process_pdfs(..., llm=)`,
   (por defecto los de Claude Haiku 5.5: 0,10 y 0,50 USD por millón de tokens).
 - `segmento.extra["campo_fuente"]` indica por campo si el valor vino del `ocr` o del `llm`; la web
   puede mostrarlo junto a cada campo.
+
+## 2. Periodo del proyecto (`DATE_OUT_OF_PERIOD`)
+
+La regla ya está en `rules/xunta.yaml` y `rules/aecid.yaml` y en `pipeline/checks.py`
+(`project_period`). Lee el periodo con `getattr(project, "start_date", None)` /
+`getattr(project, "end_date", None)` (acepta `date` o `datetime`; basta uno de los dos):
+
+- **`models.py` + Alembic**: añadir `Project.start_date` y `Project.end_date` (`Date`, nulos).
+  Hasta entonces `build_context` devuelve `period=None` y la regla no se aplica.
+- **API/web**: permitir informar el periodo al crear/editar el proyecto (o leerlo del informe del
+  donante).
+- Referencia normativa de Xunta: el YAML cita `Rules.xlsx` y la Orden AH 2024 de forma genérica;
+  falta confirmar el artículo exacto de la convocatoria (no hay copia en el repo).

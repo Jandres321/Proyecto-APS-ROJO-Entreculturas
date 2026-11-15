@@ -46,6 +46,26 @@ rules:
       check_payment_date: true            # el listado de Xunta trae "<fecha> y con <forma de pago>"
       payment_tolerance_days: 5
 
+  - code: DATE_OUT_OF_PERIOD
+    description: >-
+      La fecha del justificante y la del pago deben caer dentro del periodo de ejecución del
+      proyecto. Solo se aplica si el proyecto tiene fecha de inicio y/o de fin.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Rules.xlsx (control de plazo de ejecución); Orden AH 2024 (DOG 91, 10/05/2024): solo son
+      subvencionables los gastos realizados dentro del plazo de ejecución de la resolución
+      (artículo por confirmar con el texto de la convocatoria).
+    severity: medium
+    params:
+      sources: [execution_period]
+      document_types: [factura, recibo, liquidacion]
+      check_payment_date: true            # fecha de pago del listado y del justificante bancario
+      document_grace_days: 0              # días de margen sobre el periodo para la fecha del documento
+      payment_grace_days: 0               # idem para la fecha de pago
+      soft_below_ocr_confidence: 70       # fecha leída con OCR poco fiable: severidad baja
+      soft_link_confidences: [high, medium]
+
   - code: DONOR_STAMP_MISSING
     description: >-
       Todos los justificantes originales llevan un sello-diligencia con la convocatoria anual, el

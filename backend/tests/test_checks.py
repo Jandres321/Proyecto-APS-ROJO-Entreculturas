@@ -47,14 +47,14 @@ def seg(i=1, doc="d1", tipo="factura", **kw) -> ck.Seg:
     return ck.Seg(id=i, doc_key=doc, tipo=tipo, **kw)
 
 
-def run(rules, expenses_segments, bundle_extra=()):
+def run(rules, expenses_segments, bundle_extra=(), period=None):
     """expenses_segments: [(expense, [linked segs])]; bundle = linked + bundle_extra."""
     cases, of_seg = [], {}
     for exp, linked in expenses_segments:
         cases.append(ck.Case(exp, list(linked), [*linked, *bundle_extra]))
         for s in linked:
             of_seg.setdefault(s.id, []).append(exp)
-    ctx = ck.CheckContext(rules, cases, of_seg)
+    ctx = ck.CheckContext(rules, cases, of_seg, period)
     return ck.check_documents(ctx) + ck.check_file_completeness(ctx) + ck.check_duplicates(ctx)
 
 
@@ -184,6 +184,68 @@ def test_aecid_does_not_check_payment_date():
     exp = expense(date=D(2024, 3, 20), extra={"payment": "02/04/2024 transferencia"})
     out = run(aecid(), [(exp, [seg(2, tipo="transferencia", fecha=D(2024, 6, 1))])])
     assert "DATE_MISMATCH" not in codes(out)
+
+
+# --- DATE_OUT_OF_PERIOD ---
+
+PERIOD = (D(2024, 1, 1), D(2024, 12, 31))
+
+
+def _period_findings(out):
+    return [f for f in out if f.rule_code == "DATE_OUT_OF_PERIOD"]
+
+
+def test_payment_after_the_closing_date_is_flagged():
+    exp = expense(date=D(2024, 12, 20), extra={"payment": "15/01/2025 y con transferencia"})
+    out = run(xunta(), [(exp, [seg(fecha=D(2024, 12, 20))])], period=PERIOD)
+    [finding] = _period_findings(out)
+    assert "de pago" in finding.message and "posterior al cierre" in finding.message
+    assert "15/01/2025" in finding.message and "01/01/2024 - 31/12/2024" in finding.message
+    assert finding.severity == Severity.MEDIUM
+    assert finding.evidence["posicion"] == "despues"
+    assert finding.evidence["referencia"]
+
+
+def test_document_date_outside_the_period_and_bank_proof_date():
+    exp = expense(date=D(2023, 12, 20))
+    linked = [seg(fecha=D(2023, 12, 20)), seg(2, tipo="transferencia", fecha=D(2025, 2, 1))]
+    out = _period_findings(run(aecid(), [(exp, linked)], period=PERIOD))
+    assert {f.evidence["tipo_fecha"] for f in out} == {"del documento", "de pago"}
+    assert {f.evidence["posicion"] for f in out} == {"antes", "despues"}
+
+
+def test_dates_inside_the_period_and_the_grace_days_are_fine():
+    exp = expense(extra={"payment": "31/12/2024 transferencia"})
+    inside = run(xunta(), [(exp, [seg(fecha=D(2024, 6, 1))])], period=PERIOD)
+    assert not _period_findings(inside)
+    edge = expense(extra={"payment": "02/01/2025 transferencia"})
+    assert _period_findings(run(xunta(), [(edge, [seg()])], period=PERIOD))
+    rules = xunta()
+    rules.rules["DATE_OUT_OF_PERIOD"].params["payment_grace_days"] = 5
+    assert not _period_findings(run(rules, [(edge, [seg()])], period=PERIOD))
+
+
+def test_without_a_period_the_rule_does_not_apply():
+    exp = expense(extra={"payment": "15/01/2030 transferencia"})
+    assert not _period_findings(run(xunta(), [(exp, [seg(fecha=D(2030, 1, 1))])], period=None))
+    open_ended = (D(2024, 1, 1), None)  # only a start date: only "antes" can happen
+    assert not _period_findings(run(xunta(), [(exp, [seg()])], period=open_ended))
+
+
+def test_ocr_dates_outside_the_period_are_soft_when_the_reading_is_doubtful():
+    exp = expense(date=D(2024, 5, 1), link_confidence="high")
+    out = _period_findings(run(xunta(), [(exp, [seg(fecha=D(2023, 5, 1))])], period=PERIOD))
+    [finding] = out
+    assert finding.severity == Severity.LOW and finding.message.startswith("Revisar la lectura")
+
+
+def test_project_period_reads_optional_columns():
+    from types import SimpleNamespace
+
+    assert ck.project_period(SimpleNamespace()) is None  # columns not added yet
+    assert ck.project_period(SimpleNamespace(start_date=None, end_date=None)) is None
+    both = SimpleNamespace(start_date=dt.datetime(2024, 1, 1, 9), end_date=D(2024, 12, 31))
+    assert ck.project_period(both) == PERIOD
 
 
 # --- DONOR_STAMP_MISSING ---

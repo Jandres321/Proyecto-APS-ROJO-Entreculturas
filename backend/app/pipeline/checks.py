@@ -13,7 +13,8 @@ Two views of an expense's documents are used:
 
 Checks (rule codes in app/rules.py): AMOUNT_MISMATCH, DATE_MISMATCH, DONOR_STAMP_MISSING,
 NOT_AN_INVOICE, PAYMENT_EVIDENCE_MISSING, CASH_OVER_LIMIT, ILLEGIBLE (`check_documents`),
-DOC_INCOMPLETE (`check_file_completeness`) and DUPLICATE_INVOICE (`check_duplicates`).
+DATE_OUT_OF_PERIOD (when the project has a period), DOC_INCOMPLETE (`check_file_completeness`)
+and DUPLICATE_INVOICE (`check_duplicates`).
 An expense without any linked segment gets none of the document checks: DOC_MISSING (content
 matching) already reports it.
 """
@@ -41,6 +42,7 @@ from app.rules import (
     CASH_OVER_LIMIT,
     CHECK_CODES,
     DATE_MISMATCH,
+    DATE_OUT_OF_PERIOD,
     DOC_INCOMPLETE,
     DONOR_STAMP_MISSING,
     DUPLICATE_INVOICE,
@@ -171,6 +173,9 @@ class CheckContext:
     cases: list[Case]
     # segment id -> every expense linked to it (a document can back several expenses)
     expenses_of_segment: dict[int, list[ExpenseFacts]] = field(default_factory=dict)
+    # Execution period of the project (start, end); either end may be None. None = no period known,
+    # so DATE_OUT_OF_PERIOD does not apply.
+    period: tuple[dt.date | None, dt.date | None] | None = None
 
 
 # --- small helpers --------------------------------------------------------------------------
@@ -221,6 +226,19 @@ def _finding(
 
 def _within(a: Decimal, b: Decimal, pct: float, absolute: float) -> bool:
     return abs(a - b) <= max(Decimal(str(absolute)), abs(b) * Decimal(str(pct)))
+
+
+def unreliable_reading(exp: ExpenseFacts, seg: Seg, params: dict[str, Any]) -> str | None:
+    """Why a value read from `seg` is probably an OCR misreading rather than a real discrepancy
+    (None = no reason to doubt it): the document is linked to the expense with high/medium
+    confidence, or the OCR confidence is low. Thresholds come from the rule's params."""
+    floor = params.get("soft_below_ocr_confidence", 70)
+    trusted = set(params.get("soft_link_confidences", ["high", "medium"]))
+    if exp.link_confidence in trusted:
+        return "el documento está asignado con confianza alta/media"
+    if seg.confianza_ocr is not None and seg.confianza_ocr < floor:
+        return f"la lectura del documento es poco fiable ({seg.confianza_ocr:.0f} %)"
+    return None
 
 
 def payment_method(expense: ExpenseFacts, params: dict[str, Any]) -> str | None:
@@ -296,16 +314,9 @@ def _check_amount(ctx: CheckContext, case: Case) -> list[FindingIn]:
     # Most disagreements on trusted links are OCR misreadings (handwriting, stamps over the
     # total): in Uganda all 37 "contradicted" links were right. Report them as a low-severity
     # "check the reading" instead of an error.
-    ocr_floor = params.get("soft_below_ocr_confidence", 70)
-    trusted_link = exp.link_confidence in set(params.get("soft_link_confidences", ["high", "medium"]))
-    weak_reading = seg.confianza_ocr is not None and seg.confianza_ocr < ocr_floor
-    soft = trusted_link or weak_reading
+    why = unreliable_reading(exp, seg, params)
+    soft = why is not None
     if soft:
-        why = (
-            "el documento está asignado con confianza alta/media"
-            if trusted_link
-            else f"la lectura del documento es poco fiable ({seg.confianza_ocr:.0f} %)"
-        )
         message = (
             f"Revisar la lectura del importe: {message[0].lower()}{message[1:-1]}. Probablemente "
             f"sea un error de lectura del OCR, porque {why}; compruébalo en el PDF."
@@ -369,6 +380,92 @@ def _check_date(ctx: CheckContext, case: Case) -> list[FindingIn]:
                 dias=days,
             )
         )
+    return out
+
+
+def project_period(project: Any) -> tuple[dt.date | None, dt.date | None] | None:
+    """The project's execution period from `start_date` / `end_date` (None when it has neither;
+    the columns may not exist yet). Datetimes are reduced to dates."""
+    values = []
+    for name in ("start_date", "end_date"):
+        value = getattr(project, name, None)
+        values.append(value.date() if isinstance(value, dt.datetime) else value)
+    return (values[0], values[1]) if any(values) else None
+
+
+def _outside(day: dt.date, period: tuple[dt.date | None, dt.date | None], grace: int) -> str | None:
+    """'antes' / 'despues' when `day` falls outside the period (± `grace` days), else None."""
+    start, end = period
+    if start and day < start - dt.timedelta(days=grace):
+        return "antes"
+    if end and day > end + dt.timedelta(days=grace):
+        return "despues"
+    return None
+
+
+def _period_text(period: tuple[dt.date | None, dt.date | None]) -> str:
+    start, end = period
+    if start and end:
+        return f"{_date(start)} - {_date(end)}"
+    return f"desde el {_date(start)}" if start else f"hasta el {_date(end)}"
+
+
+def _check_period(ctx: CheckContext, case: Case) -> list[FindingIn]:
+    """DATE_OUT_OF_PERIOD: document date and payment date inside the project's period."""
+    rule = ctx.rules.applies(DATE_OUT_OF_PERIOD, case.expense.partida_code)
+    if rule is None or ctx.period is None:
+        return []
+    params = rule.params or {}
+    period, exp = ctx.period, case.expense
+    verdict = {"antes": "anterior al inicio", "despues": "posterior al cierre"}
+    out: list[FindingIn] = []
+
+    def report(kind: str, day: dt.date, side: str, seg: Seg | None, source: str) -> None:
+        why = unreliable_reading(exp, seg, params) if seg is not None else None
+        message = (
+            f"La fecha {kind} del gasto {exp.ref} ({_date(day)}; {source}) es {verdict[side]} "
+            f"del periodo del proyecto ({_period_text(period)})."
+        )
+        if why:
+            message = (
+                f"Revisar la lectura: {message[0].lower()}{message[1:-1]}. Probablemente sea un "
+                f"error de lectura de la fecha, porque {why}; compruébalo en el PDF."
+            )
+        out.append(
+            _finding(
+                rule,
+                case,
+                message,
+                seg=seg,
+                severity=Severity.LOW if why else None,
+                fecha=day.isoformat(),
+                tipo_fecha=kind,
+                posicion=side,
+                periodo_inicio=period[0].isoformat() if period[0] else None,
+                periodo_fin=period[1].isoformat() if period[1] else None,
+                lectura_dudosa=bool(why),
+            )
+        )
+
+    grace = params.get("document_grace_days", 0)
+    dated = [s for s in case.linked if s.tipo in _types(params) and s.fecha]
+    outside = [(s, _outside(s.fecha, period, grace)) for s in dated]
+    if dated and all(side for _, side in outside):
+        seg, side = outside[0]
+        report("del documento", seg.fecha, side or "", seg, seg.where)
+
+    if not params.get("check_payment_date", True):
+        return out
+    pay_grace = params.get("payment_grace_days", 0)
+    paid = payment_date(exp)
+    if paid and (side := _outside(paid, period, pay_grace)):
+        report("de pago", paid, side, None, "según el listado")
+    else:
+        proofs = [s for s in case.bundle if s.tipo == "transferencia" and s.fecha]
+        late = [(s, _outside(s.fecha, period, pay_grace)) for s in proofs]
+        if proofs and all(side for _, side in late):
+            seg, side = late[0]
+            report("de pago", seg.fecha, side or "", seg, f"justificante bancario, {seg.where}")
     return out
 
 
@@ -656,6 +753,7 @@ def check_documents(ctx: CheckContext) -> list[FindingIn]:
         for check in (
             _check_amount,
             _check_date,
+            _check_period,
             _check_stamp,
             _check_not_invoice,
             _check_payment,
@@ -974,8 +1072,10 @@ def build_context(session: Session, project_id: int) -> CheckContext:
     ):
         conf = doc_link.confidence.value if doc_link.confidence is not None else None
         exp_facts = facts.get(doc_link.expense_id)
-        if exp_facts is not None and conf and rank.get(conf, 0) > rank.get(
-            exp_facts.link_confidence or "", 0
+        if (
+            exp_facts is not None
+            and conf
+            and rank.get(conf, 0) > rank.get(exp_facts.link_confidence or "", 0)
         ):
             exp_facts.link_confidence = conf
 
@@ -987,7 +1087,9 @@ def build_context(session: Session, project_id: int) -> CheckContext:
             for sib in by_doc[s.doc_key]:
                 bundle[sib.id] = sib
         cases.append(Case(exp, own, sorted(bundle.values(), key=lambda s: s.id)))
-    return CheckContext(load_rules(project.donor), cases, dict(expenses_of))
+    return CheckContext(
+        load_rules(project.donor), cases, dict(expenses_of), project_period(project)
+    )
 
 
 def run_checks(session: Session, project_id: int) -> list[FindingIn]:

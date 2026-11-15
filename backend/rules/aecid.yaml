@@ -45,6 +45,24 @@ rules:
       check_payment_date: false           # el listado AECID no recoge la fecha de pago
       payment_tolerance_days: 5
 
+  - code: DATE_OUT_OF_PERIOD
+    description: >-
+      La fecha del justificante y la del pago deben caer dentro del periodo de ejecución del
+      proyecto. Solo se aplica si el proyecto tiene fecha de inicio y/o de fin.
+    kind: deterministic
+    applies_to_partidas: []
+    reference: >-
+      Guía AECID, 10.6 (R11-VII.1.6), pág. 88: fechas de justificantes y pagos dentro del periodo
+      de ejecución y justificación.
+    severity: medium
+    params:
+      document_types: [factura, recibo, liquidacion]
+      check_payment_date: true            # solo actúa si hay fecha de pago (justificante bancario)
+      document_grace_days: 0
+      payment_grace_days: 0
+      soft_below_ocr_confidence: 70
+      soft_link_confidences: [high, medium]
+
   - code: DONOR_STAMP_MISSING
     description: >-
       Todos los justificantes originales llevan el sello-diligencia con el código del convenio,
